@@ -64,7 +64,12 @@ python finminmode.py
 * `one_mode_map.csv` — all 1‑mode hits with provenance/weights
 * `one_mode_map_corner.png` — corner plot of the 1‑mode region
 
-If `REUSE_EXISTING = True` (default) and the CSV exists, the script will **skip FEW calls** and just replot from disk.
+
+## Example result
+
+![One‑mode region (corner plot)](one_mode_map_corner.png)
+
+> The figure is produced by `finminmode.py` and saved as `<SAVE_PREFIX>_corner.png` (default: `one_mode_map_corner.png`). To replot without re‑evaluating FEW, keep `one_mode_map.csv` and set `REUSE_EXISTING=True`.
 
 ---
 
