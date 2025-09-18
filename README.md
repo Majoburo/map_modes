@@ -1,4 +1,4 @@
-# finminmode — map 1‑mode regions for EMRI harmonics
+# one_mode_map — map 1‑mode regions for EMRI harmonics
 
 This repo contains a small, self‑contained mapper that searches EMRI parameter space for regions where **exactly one spherical‑harmonic mode** exceeds a chosen **per‑mode SNR threshold** (default **SNR ≥ 17**), then visualizes the results in a **corner plot**.
 
@@ -31,7 +31,7 @@ uv venv
 uv sync
 
 # run the mapper (edit settings inside the script first if needed)
-uv run python finminmode.py
+uv run python one_mode_map.py
 ```
 
 **Common uv tasks**
@@ -56,7 +56,7 @@ uv sync
 pip install fastemriwaveforms numpy scipy matplotlib tqdm corner
 
 # run
-python finminmode.py
+python one_mode_map.py
 ```
 
 **Outputs** (prefix controlled by `SAVE_PREFIX`):
@@ -69,17 +69,17 @@ python finminmode.py
 
 ![One‑mode region (corner plot)](one_mode_map_corner.png)
 
-> The figure is produced by `finminmode.py` and saved as `<SAVE_PREFIX>_corner.png` (default: `one_mode_map_corner.png`). To replot without re‑evaluating FEW, keep `one_mode_map.csv` and set `REUSE_EXISTING=True`.
+> The figure is produced by `one_mode_map.py` and saved as `<SAVE_PREFIX>_corner.png` (default: `one_mode_map_corner.png`). To replot without re‑evaluating FEW, keep `one_mode_map.csv` and set `REUSE_EXISTING=True`.
 
 ---
 
 ## File layout
 
-* `finminmode.py` — main script (scanner + plotting + CSV IO)
+* `one_mode_map.py` — main script (scanner + plotting + CSV IO)
 
 ---
 
-## Configuration (inside `finminmode.py`)
+## Configuration (inside `one_mode_map.py`)
 
 ### Observation / detection
 
