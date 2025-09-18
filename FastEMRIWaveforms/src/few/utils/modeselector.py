@@ -6,7 +6,7 @@ import sys
 import numpy as np
 
 from .baseclasses import BackendLike, ParallelModuleBase
-from .constants import MTSUN_SI, PI
+from .constants import MTSUN_SI, PI, Gpc, MRSUN_SI
 from .geodesic import get_fundamental_frequencies
 from .globals import get_logger
 
@@ -133,6 +133,8 @@ class ModeSelector(ParallelModuleBase):
         mode_selection: Optional[Union[str, list, np.ndarray]] = None,
         include_minus_mkn: Optional[bool] = True,
         mode_selection_threshold: float = 1e-5,
+        dt: Optional[float] = None,
+        dist: Optional[float] = None,
         sensitivity_fn: Optional[object] = None,
         force_backend: BackendLike = None,
         **kwargs,
@@ -173,6 +175,8 @@ class ModeSelector(ParallelModuleBase):
         but NOT m>0, we set the m>0 Ylm to zero."""
 
         self.mode_selection = mode_selection
+        self.dt = dt
+        self.dist = dist
         self.negative_m_flag = False  # flag to check if m < 0 modes are included
         """bool: Specifies whether there are negative m-modes in mode_selection."""
 
@@ -234,6 +238,10 @@ class ModeSelector(ParallelModuleBase):
         modeinds_map: Optional[np.ndarray] = None,
         include_minus_mkn: Optional[bool] = None,
         mode_selection_threshold: float = None,
+        dt: Optional[float] = None,
+        dist: Optional[float] = None,
+        snr_abs_threshold: Optional[float] = None,
+        return_mode_snr: Optional[bool] = False,
     ) -> np.ndarray:
         r"""Call to sort and filer teukolsky modes.
 
@@ -279,10 +287,21 @@ class ModeSelector(ParallelModuleBase):
                 the waveform, albeit at the cost of some accuracy (usually an
                 acceptable loss). Default that gives good mismatch qualities is
                 1e-5.
+            snr_abs_threshold: If provided, bypasses fractional cumulative power filtering
+                and instead keeps modes whose (approximate) per-mode SNR exceeds this absolute
+                threshold. The per-mode SNR is computed as sqrt(sum_t |h_mode(t)|^2 / PSD(f_mode(t))).
+                Note: this is an adiabatic approximation consistent with the existing weighting,
+                and is accurate up to an overall constant factor that is common to all modes.
+            return_mode_snr: If True, append a final return value with the per-mode SNR array
+                (for m>=0 base modes) so the caller can inspect it. Default False.
 
         """
         if include_minus_mkn is None:
             include_minus_mkn = self.include_minus_mkn
+        if dt is None:
+            dt = self.dt
+        if dist is None:
+            dist = self.dist
 
         # If mode_selection is None, default to values specified at instantiation
         if mode_selection is None:
@@ -430,6 +449,49 @@ class ModeSelector(ParallelModuleBase):
 
                 power /= PSD
 
+            # Compute once: do we need per-mode SNR?
+            need_mode_snr = (snr_abs_threshold is not None) or bool(return_mode_snr)
+
+            if need_mode_snr:
+                # --- Per-mode approximate SNR (adiabatic) ---
+                # power has shape (n_time, n_combined_modes) where combined duplicates +/-m.
+                # First sum over time to get per-(combined)-mode SNR^2; then fold -m onto +m
+                # and take sqrt to obtain an (approximate) per-mode SNR for base (m>=0) modes.
+                snr2_combined = power.sum(axis=0)
+                mu = m1 * m2 / (m1 + m2)
+                dist_dimensionless = (dist * Gpc) / (mu * MRSUN_SI)
+                # Vectorised fold of (-m) block onto (+m) block
+                # Base block: indices [0 : num_m_zero_up), with mask 'm0mask' indicating m>0
+                # Conjugate block: indices [num_m_zero_up : num_m_zero_up + num_m_1_up)
+                snr2_base = snr2_combined[: self.num_m_zero_up].copy()
+                snr2_base[self.m0mask] += snr2_combined[self.num_m_zero_up : self.num_m_zero_up + self.num_m_1_up]
+                mode_snr = self.xp.sqrt(snr2_base)/dist_dimensionless*dt*4
+
+                # Expose per-mode SNR for external inspection
+                self.mode_snr = mode_snr  # length = number of base (m>=0) modes
+
+                # Optional fast path: select modes by absolute per-mode SNR threshold
+                if snr_abs_threshold is not None:
+                    
+                    keep_modes = self.xp.where(mode_snr >= snr_abs_threshold)[0]
+
+                    # Build Ylm selection that duplicates m=0 and shifts m>0 block as in the 'all' path
+                    temp2 = keep_modes * (keep_modes < self.num_m0) + (
+                        keep_modes + self.num_m_1_up
+                    ) * (keep_modes >= self.num_m0)
+                    ylmkeep = self.xp.concatenate([keep_modes, temp2])
+                    ylms_out = ylms[ylmkeep]
+                    teuk_modes_out = teuk_modes
+
+                    # Prepare outputs analogous to the 'all' path
+                    out1 = (teuk_modes_out[:, keep_modes], ylms_out)
+                    out2 = tuple([arr[keep_modes] for arr in modeinds])
+
+                    if return_mode_snr:
+                        return out1 + out2 + (mode_snr,)
+                    else:
+                        return out1 + out2
+
             # sort the power for a cumulative summation
             inds_sort = self.xp.argsort(power, axis=1)[:, ::-1]
             power = self.xp.sort(power, axis=1)[:, ::-1]
@@ -498,6 +560,9 @@ class ModeSelector(ParallelModuleBase):
         # setup up mode values that have been kept
         out2 = tuple([arr[keep_modes] for arr in modeinds])
 
+        if return_mode_snr:
+            # In the default (fractional) path, return the per-mode SNR array for all base modes
+            return out1 + out2 + (self.mode_snr,)
         return out1 + out2
 
 

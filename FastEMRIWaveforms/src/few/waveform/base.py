@@ -278,7 +278,7 @@ class SphericalHarmonicWaveformBase(
                     "(SphericalHarmonicWaveformBase) Warning: Mode selector is predictive. Overwriting mode_selection."
                 )
             mode_selection = self.mode_selector(
-                m1, m2, a * xI0, p0, e0, 1.0, theta, phi, T, mode_selection_threshold
+                m1, m2, a * xI0, p0, e0, 1.0, theta, phi, T, mode_selection_threshold, dist, dt
             )  # TODO: update this if more arguments are required
 
         # split into batches
@@ -366,6 +366,7 @@ class SphericalHarmonicWaveformBase(
                 modeinds_map=modeinds_map,
                 include_minus_mkn=include_minus_mkn,
                 mode_selection_threshold=mode_selection_threshold,
+                snr_abs_threshold=kwargs['snr_abs_threshold'],
             )
 
             # store number of modes for external information
