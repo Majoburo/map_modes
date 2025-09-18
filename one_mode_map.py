@@ -5,6 +5,7 @@ import numpy as np
 import corner as _corner
 from tqdm.auto import tqdm as _tqdm
 from scipy.stats import qmc
+import matplotlib.pyplot as plt
 
 from few import get_file_manager
 from few.summation.interpolatedmodesum import CubicSplineInterpolant
@@ -20,21 +21,14 @@ THR_SNR = 17.       # absolute per-mode SNR threshold (keep modes with SNR >= TH
 RANDOM_SEED = 123
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(200000))    # total random samples over the full prior hyper-rectangle
-SCAN_REFINE_ROUNDS = 2  # how many local refinement rounds around 1-mode hits
-SCAN_REFINE_FRACTION = 0.25  # fraction of current hits to jitter-refine per round
-SCAN_JITTER_SIGMA = np.array([0.05, 0.05, 0.05, 0.05])  # std-dev for (log10_m1, log10_m2, u, e0)
+SCAN_SAMPLES = 1_024    # total random samples over the full prior hyper-rectangle
+
 SAVE_PREFIX = "one_mode_map"  # output prefix for CSV and PNG
 
 # --- Plotting & storage controls ---
-# If True and a CSV exists, skip scanning and just replot from disk.
-REUSE_EXISTING = True
-# Use only uniform samples (no-refine) to drive corner KDE/histograms.
-PLOT_UNIFORM_ONLY_DENSITY = True
-# If refine points are included in KDE, this is their relative weight.
-REFINE_KDE_WEIGHT = 0.1
-# Overlay transparency for refine points in off-diagonal panels.
-REFINE_OVERLAY_ALPHA = 0.
+# Shared plotting layout for corner
+SELECT_COLS = [0, 1, 3, 4]  # indices -> (log10_m1, log10_m2, e0, p0)
+LABELS = [r"$\log_{10} M_1$", r"$\log_{10} M_2$", r"$e_0$", r"$p_0$"]
 
 # Parameter ranges (intrinsic)
 LOG10_M1_RANGE = (math.log10(5e5), math.log10(2e6))  # MBH mass
@@ -94,14 +88,6 @@ def _p0_from_u(u: float, e0: float) -> float:
     return 10.0 + float(u) * (6.0 + 2.0 * float(e0))
 
 
-def _clip_params(log10_m1, log10_m2, u, e0):
-    log10_m1 = float(np.clip(log10_m1, *LOG10_M1_RANGE))
-    log10_m2 = float(np.clip(log10_m2, *LOG10_M2_RANGE))
-    u = float(np.clip(u, *U_RANGE))
-    e0 = float(np.clip(e0, *e0_RANGE))
-    return log10_m1, log10_m2, u, e0
-
-
 def _sample_uniform(n, rng):
     sampler = qmc.Sobol(d=4, scramble=True, seed=rng.integers(2**31-1))
     X = sampler.random(n)
@@ -112,21 +98,18 @@ def _sample_uniform(n, rng):
     return l1, l2, u, e0
 
 
-def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED, refine_rounds: int = 1):
+def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED):
     """
     Randomly sample the full parameter box and keep parameter tuples where the
-    evaluator returns exactly one kept mode. Then optionally refine locally around
-    a subset of those hits by jittering the parameters.
+    evaluator returns exactly one kept mode.
 
     Returns:
-        pts:      float array of shape (N, 7) with columns [log10_m1, log10_m2, u, e0, p0, m1, m2]
-        weights:  float array of shape (N,) with plotting weights (1.0 for uniform, REFINE_KDE_WEIGHT for refine)
-        is_refine:bool array of shape (N,) True for refine-origin points, False for uniform
+        pts:          float array (N, 5): [log10_m1, log10_m2, u, e0, p0]
+        mode_indices: int array (N, 4): kept base mode (l,m,k,n) for each point
     """
     rng = np.random.default_rng(seed)
     keep = []
-    keep_w = []
-    is_ref = []
+    modes_rec = []
     seen = set()
 
     # First, uniform sampling over the full box
@@ -140,117 +123,95 @@ def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED, refine_rounds:
         if key in seen:
             continue
         seen.add(key)
-        n = eval_count_cached(lm1, lm2, u, e0, THR_SNR)
+        n, mode_tuple = eval_count_and_mode_cached(lm1, lm2, u, e0, THR_SNR)
         if n == 1.0:
             p0 = _p0_from_u(u, e0)
             keep.append((lm1, lm2, u, e0, p0))
-            keep_w.append(1.0)
-            is_ref.append(False)
-
-    # Local refinements around the discovered hits (helps trace the boundary)
-    for r in range(refine_rounds):
-        if not keep:
-            break
-        # choose a subset to jitter
-        idx = rng.choice(len(keep), size=max(1, int(len(keep) * SCAN_REFINE_FRACTION)), replace=False)
-        seeds = np.array([keep[i][:4] for i in idx])  # columns: log10_m1, log10_m2, u, e0
-        noise = rng.normal(loc=0.0, scale=SCAN_JITTER_SIGMA, size=seeds.shape)
-        proposals = seeds + noise
-        for row in _tqdm(proposals, desc=f"[scan] refine {r+1}/{refine_rounds}", leave=False):
-            lm1, lm2, u, e0 = _clip_params(*row)
-            lm1 = round(lm1, 6); lm2 = round(lm2, 6); u = round(u, 6); e0 = round(e0, 6)
-            key = (lm1, lm2, u, e0)
-            if key in seen:
-                continue
-            seen.add(key)
-            n = eval_count_cached(lm1, lm2, u, e0, THR_SNR)
-            if n == 1.0:
-                p0 = _p0_from_u(u, e0)
-                keep.append((lm1, lm2, u, e0, p0))
-                keep_w.append(REFINE_KDE_WEIGHT)
-                is_ref.append(True)
+            modes_rec.append(mode_tuple)
 
     if not keep:
-        return np.empty((0, 5), dtype=np.float64), np.empty((0,), dtype=np.float64), np.zeros((0,), dtype=bool)
-    return np.array(keep, dtype=np.float64), np.array(keep_w, dtype=np.float64), np.array(is_ref, dtype=bool)
+        return np.empty((0, 5), float), np.empty((0, 4), int)
+    return np.array(keep, float), np.array(modes_rec, int)
 
 
-def make_corner_plot(
+def make_scatter_corner(
     pts: np.ndarray,
-    is_refine: np.ndarray = None,
-    weights: np.ndarray = None,
-    uniform_only_density: bool = PLOT_UNIFORM_ONLY_DENSITY,
-    refine_weight: float = REFINE_KDE_WEIGHT,
-    overlay_alpha: float = REFINE_OVERLAY_ALPHA,
+    mode_indices: np.ndarray,
 ):
     """
-    Corner-style plot of the 1-mode region using variables:
-    (log10_m1, log10_m2, e0, p0).
-    Density (KDE + histograms) is built from uniform-only by default to avoid boundary bias.
-    Refine points are overlaid as faint scatter on off-diagonals.
-
+    Corner-style scatter plot colored by the kept base mode (l,m,k,n).
     pts columns: [log10_m1, log10_m2, u, e0, p0]
     """
-    X = pts[:, [0, 1, 3, 4]]
-    labels = [r"$\log_{10} M_1$", r"$\log_{10} M_2$", r"$e_0$", r"$p_0$"]
+    X = pts[:, SELECT_COLS]
+    labels = LABELS
+    alpha = 0.15
+    ms = 6
 
-    if is_refine is None:
-        # If no provenance provided, assume all uniform
-        is_refine = np.zeros(len(pts), dtype=bool)
+    # Build categorical labels from (l,m,k,n)
+    mode_labels = np.array([f"{l},{m},{k},{n}" for (l,m,k,n) in mode_indices], dtype=object)
+    uniq = np.unique(mode_labels)
+    # push unknown "-1,-1,-1,-1" to end
+    uniq = np.array(sorted(uniq, key=lambda s: (s == "-1,-1,-1,-1", s)))
 
-    # Build plotting weights: zero out refine for density if requested
-    if weights is None:
-        weights = np.ones(len(pts), dtype=float)
-    if uniform_only_density:
-        kde_weights = weights.copy()
-        kde_weights[is_refine] = 0.0
-    else:
-        kde_weights = weights.copy()
-        kde_weights[is_refine] = float(refine_weight)
+    prop_cycle = plt.rcParams['axes.prop_cycle'].by_key().get('color', ['C0','C1','C2','C3','C4','C5','C6','C7','C8','C9'])
+    color_map = {lab: prop_cycle[i % len(prop_cycle)] for i, lab in enumerate(uniq)}
 
     fig = _corner.corner(
         X,
         labels=labels,
-        weights=kde_weights,
         bins=50,
-        #smooth=1.5,
         plot_datapoints=False,
-        fill_contours=True,
-        levels=(0.50, 0.84, 0.97),
+        plot_contours=False,
+        fill_contours=False,
         hist_bin_factor=2,
     )
+    axes = np.array(fig.axes).reshape(len(labels), len(labels))
 
-    # Overlay refine points as faint scatter in off-diagonals
-    X_ref = X[is_refine]
-    if X_ref.size:
-        axes = np.array(fig.axes).reshape(len(labels), len(labels))
-        for i in range(len(labels)):
-            for j in range(len(labels)):
-                if i > j:
-                    ax = axes[i, j]
+    # Off-diagonal scatter per category
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            if i > j:
+                ax = axes[i, j]
+                for lab in uniq:
+                    mask = mode_labels == lab
+                    if not np.any(mask):
+                        continue
                     ax.scatter(
-                        X_ref[:, j], X_ref[:, i],
-                        s=4, alpha=overlay_alpha, rasterized=True
+                        X[mask, j], X[mask, i],
+                        s=ms, alpha=alpha, color=color_map[lab], rasterized=True
                     )
+
+    # Simple legend (cap to 20 entries to avoid clutter)
+    legend_ax = axes[0, -1]
+    handles, labels_ = [], []
+    for lab in uniq[:20]:
+        handles.append(plt.Line2D([], [], marker='o', linestyle='None', markersize=6, color=color_map[lab], label=f"mode ({lab})" if lab != "-1,-1,-1,-1" else "mode ?"))
+        labels_.append(f"mode ({lab})" if lab != "-1,-1,-1,-1" else "mode ?")
+    legend_ax.legend(handles, labels_, loc="upper right", frameon=False, fontsize=8)
+
     fig.tight_layout()
     return fig
 
 
 @lru_cache(maxsize=20000)
-def eval_count_cached(
+def eval_count_and_mode_cached(
     log10_m1: float, log10_m2: float, u: float, e0: float, thr: float
-) -> float:
-    """Return number of kept modes (>=0), or +inf on error. Cached by rounded args."""
+) -> tuple[float, tuple[int, int, int, int]]:
+    """
+    Return (num_kept, (l,m,k,n)) where the tuple is the single kept base mode if num_kept==1,
+    or (-1,-1,-1,-1) otherwise. Returns (+inf, (-1,-1,-1,-1)) on infeasible/error.
+    """
     m1 = 10 ** float(log10_m1)
     m2 = 10 ** float(log10_m2)
     p0 = _p0_from_u(u, e0)
 
-
-    # Feasibility guaranteed by construction, but guard anyway
+    # Feasibility guard
     if not (10.0 <= p0 <= 16.0 + 2.0 * e0) or not (0.0 <= e0 <= 0.75):
-        return float("inf")
+        return float("inf"), (-1, -1, -1, -1)
     try:
-        few_noise_weighted(
+        breakpoint()
+        # Ask FEW to also provide per-mode SNR and base (l,m,k,n) mapping
+        ret = few_noise_weighted(
             m1,
             m2,
             p0,
@@ -261,57 +222,57 @@ def eval_count_cached(
             snr_abs_threshold=float(thr),
             dist=float(DIST_GPC),
             dt=float(DT_SEC),
+            return_mode_snr=True,
         )
-        return float(few_noise_weighted.num_modes_kept)
+        
+        # (mode_snr, l_base, m_base, k_base, n_base)
+        n_kept = float(getattr(few_noise_weighted, "num_modes_kept", float("inf")))
+        mode_tuple = (-1, -1, -1, -1)
+        if isinstance(ret, tuple) and len(ret) >= 5:
+            mode_snr, l_base, m_base, k_base, n_base = ret[-5:]
+            try:
+                import numpy as _np
+                mask = _np.asarray(mode_snr) >= float(thr)
+                if int(mask.sum()) == 1 and n_kept == 1.0:
+                    idx = int(_np.where(mask)[0][0])
+                    mode_tuple = (int(l_base[idx]), int(m_base[idx]), int(k_base[idx]), int(n_base[idx]))
+            except Exception:
+                pass
+        return n_kept, mode_tuple
     except Exception as e:
-        print(e)
-        exit()
-        return float("inf")
+        print(f"[eval-error] {e} @ (log10_m1={log10_m1}, log10_m2={log10_m2}, u={u}, e0={e0})")
+        return float("inf"), (-1, -1, -1, -1)
 
 
-def save_pts_csv(path, pts, weights=None, is_refine=None):
-    if weights is None:
-        weights = np.ones(len(pts), float)
-    if is_refine is None:
-        is_refine = np.zeros(len(pts), bool)
-    arr = np.concatenate([pts, is_refine.astype(int).reshape(-1,1), weights.reshape(-1,1)], axis=1)
-    header = "log10_m1,log10_m2,u,e0,p0,is_refine,w"
+def save_pts_csv(path, pts, mode_indices):
+    arr = np.concatenate([pts, mode_indices.astype(float)], axis=1)
+    header = "log10_m1,log10_m2,u,e0,p0,l,m,k,n"
     np.savetxt(path, arr, delimiter=",", header=header, comments="")
 
 def load_pts_csv(path):
     data = np.genfromtxt(path, delimiter=",", names=True)
-    # Support both structured and plain arrays
-    cols = data.dtype.names
     get = lambda k: np.asarray(data[k])
-    pts = np.stack([get("log10_m1"), get("log10_m2"), get("u"), get("e0"), get("p0")], axis=1)
-    is_refine = get("is_refine").astype(int) if "is_refine" in cols else np.zeros(len(pts), int)
-    weights = get("w") if "w" in cols else np.ones(len(pts), float)
-    return pts.astype(float), weights.astype(float), is_refine.astype(bool)
+    pts = np.stack([get("log10_m1"), get("log10_m2"), get("u"), get("e0"), get("p0")], axis=1).astype(float)
+    mode_indices = np.stack([get("l"), get("m"), get("k"), get("n")], axis=1).astype(int)
+    return pts, mode_indices
 
 
 def main():
     csv_path = f"{SAVE_PREFIX}.csv"
-    if REUSE_EXISTING and os.path.exists(csv_path):
-        print(f"[replot] Loading points from {csv_path} (skipping evaluation)...")
-        pts, weights, is_refine = load_pts_csv(csv_path)
+    if os.path.exists(csv_path):
+        print(f"[replot] Using {csv_path}")
+        pts, mode_indices = load_pts_csv(csv_path)
     else:
-        print("\n[scan] Mapping the region where exactly one mode is kept (n == 1) ...")
-        pts, weights, is_refine = random_scan_one_mode(SCAN_SAMPLES, seed=RANDOM_SEED, refine_rounds=SCAN_REFINE_ROUNDS)
+        print("[scan] Mapping the 1‑mode region …")
+        pts, mode_indices = random_scan_one_mode(SCAN_SAMPLES, seed=RANDOM_SEED)
         if pts.size == 0:
-            print("[scan] No 1-mode points found. Try increasing SCAN_SAMPLES or relaxing THR_SNR.")
+            print("[scan] No 1‑mode points found. Increase SCAN_SAMPLES or lower THR_SNR.")
             return
-        save_pts_csv(csv_path, pts, weights=weights, is_refine=is_refine)
-        print(f"[scan] Saved {len(pts)} 1-mode points to {csv_path}")
+        save_pts_csv(csv_path, pts, mode_indices)
+        print(f"[scan] Saved {len(pts)} points → {csv_path}")
 
-    fig = make_corner_plot(
-        pts,
-        is_refine=is_refine,
-        weights=weights,
-        uniform_only_density=PLOT_UNIFORM_ONLY_DENSITY,
-        refine_weight=REFINE_KDE_WEIGHT,
-        overlay_alpha=REFINE_OVERLAY_ALPHA,
-    )
-    out_png = f"{SAVE_PREFIX}_corner.png"
+    fig = make_scatter_corner(pts, mode_indices)
+    out_png = f"{SAVE_PREFIX}_corner_scatter.png"
     fig.savefig(out_png, dpi=200, bbox_inches="tight")
     print(f"[scan] Wrote corner plot to {out_png}")
 
