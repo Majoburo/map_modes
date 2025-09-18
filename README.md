@@ -118,7 +118,7 @@ python finminmode.py
 The script saves (and reloads) a single CSV with columns:
 
 ```
-log10_m1,log10_m2,u,e0,p0,m1,m2,is_refine,w
+log10_m1,log10_m2,u,e0,p0,is_refine,w
 ```
 
 * `log10_m*` — used for plotting
@@ -155,35 +155,20 @@ log10_m1,log10_m2,u,e0,p0,m1,m2,is_refine,w
 * Refinement is great for **boundary discovery**; it should not dominate the KDE (hence the plotting weights).
 * The script uses an `lru_cache` on the evaluator so revisits due to jitter don’t recompute.
 
-> For larger scans, consider splitting the uniform stage across processes and then verifying hits with the current settings (not implemented here to keep the script simple).
-
 ---
 
-## Troubleshooting
-
-* **“CubicSplineInterpolant … outside bounds” messages**: the PSD wrapper clamps queries to the valid domain, so you shouldn’t see them. If you still do, double‑check that your PSD file loaded correctly and that `DT_SEC`/`T_YEARS` are sensible.
-* **Corner plot shows banding**: some banding is physical (different harmonics dominating). To reduce lattice look in the KDE, you can raise `smooth`, `bins`, and `hist_bin_factor` inside `make_corner_plot`.
-* **No 1‑mode points found**: relax the threshold (`THR_SNR`), increase `SCAN_SAMPLES`, or widen the prior box.
-
----
 
 ## Roadmap / nice‑to‑haves
 
 * Mode‑robustness metrics on hits (e.g., top‑two SNR gap, power fraction) and coloring overlays by winning `(ℓ,m,k,n)`.
 * Coarse‑to‑fine evaluation (cheap FEW config for scanning, verify hits with fine settings).
-* Parallel uniform stage.
+* Color-code the different modes to see if it's always the 2-2 mode or not.
 
 ---
 
 ## Acknowledgments
 
 * **FastEMRIWaveforms (FEW)** for the waveform engine and LISA sensitivity utilities.
-
----
-
-## License
-
-Choose a license; common options are **MIT** or **BSD‑3‑Clause**. Add a `LICENSE` file to the repo and reference it here.
 
 ---
 
