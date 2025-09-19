@@ -11,7 +11,9 @@ dependencies = [
     "matplotlib>=3.10.6",
     "numpy>=2.2.6",
     "optuna>=4.5.0",
+    "pandas>=2.3.2",
     "scikit-learn>=1.7.2",
+    "seaborn>=0.13.2",
     "tqdm>=4.67.1",
 ]
 
@@ -24,5 +26,5 @@ dev = [
 ]
 
 [tool.uv.sources]
-fastemriwaveforms = { path = "FastEMRIWaveforms", editable = true }
+fastemriwaveforms = { path = "../FastEMRIWaveforms", editable = true }
 

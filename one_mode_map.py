@@ -21,7 +21,7 @@ THR_SNR = 10.       # absolute per-mode SNR threshold (keep modes with SNR >= TH
 RANDOM_SEED = 123
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(2_000))   # total random samples over the full prior hyper-rectangle
+SCAN_SAMPLES = 2**int(np.log2(200_000))   # total random samples over the full prior hyper-rectangle
 
 SAVE_PREFIX = "one_mode_map"  # output prefix for CSV and PNG
 
@@ -144,79 +144,12 @@ def make_scatter_corner(pts, mode_indices):
     df["mode_plot"] = np.where(df["mode"].isin(top), df["mode"], "other")
 
     g = sns.PairGrid(df, vars=cols, hue="mode_plot", corner=True, height=2.6, diag_sharey=False)
-    g.map_lower(sns.scatterplot, s=8, alpha=0.55, linewidth=0)   # no black edges
+    g.map_lower(sns.scatterplot, s=8, alpha=0.55, linewidth=0)
     g.map_diag(sns.histplot, bins=40, element="step", fill=False, linewidth=1.0)
 
     g.add_legend(frameon=False, title="mode", labelspacing=0.3, handlelength=0.8)
     plt.tight_layout()
     return g.fig
-"""
-def make_scatter_corner(
-    pts: np.ndarray,
-    mode_indices: np.ndarray,
-):
-
-    Corner-style scatter plot colored by the kept base mode (l,m,k,n).
-    pts columns: [log10_m1, log10_m2, u, e0, p0]
-
-    labels = LABELS
-    alpha = 0.15
-    ms = 6
-
-    # Build categorical labels from (l,m,k,n)
-    mode_labels = np.array([f"{l},{m},{k},{n}" for (l,m,k,n) in mode_indices], dtype=object)
-    uniq = np.unique(mode_labels)
-    # push unknown "-1,-1,-1,-1" to end
-    uniq = np.array(sorted(uniq, key=lambda s: (s == "-1,-1,-1,-1", s)))
-
-    prop_cycle = plt.rcParams['axes.prop_cycle'].by_key().get('color', ['C0','C1','C2','C3','C4','C5','C6','C7','C8','C9'])
-    color_map = {lab: prop_cycle[i % len(prop_cycle)] for i, lab in enumerate(uniq)}
-
-    fig = _corner.corner(
-        pts,
-        labels=labels,
-        bins=50,
-        plot_datapoints=False,
-        plot_contours=False,
-        fill_contours=False,
-        hist_bin_factor=2,
-    )
-    axes = np.array(fig.axes).reshape(len(LABELS), len(LABELS))
-
-    # 1) clear ALL axes (diagonals + off-diagonals)
-    for ax in fig.axes:
-        ax.cla()
-
-    # 2) re-apply labels only on the outer row/col so the figure isn’t anonymous
-    for i in range(len(LABELS)):
-        axes[i, 0].set_ylabel(LABELS[i])
-        axes[-1, i].set_xlabel(LABELS[i])
-    
-    # Off-diagonal scatter per category
-    for i in range(len(labels)):
-        for j in range(len(labels)):
-            if i > j:
-                ax = axes[i, j]
-                for lab in uniq:
-                    mask = mode_labels == lab
-                    if not np.any(mask):
-                        continue
-                    ax.scatter(
-                        pts[mask, j], pts[mask, i],
-                        s=ms, alpha=alpha, color=color_map[lab], rasterized=True
-                    )
-
-    # Simple legend (cap to 20 entries to avoid clutter)
-    legend_ax = axes[0, -1]
-    handles, labels_ = [], []
-    for lab in uniq[:20]:
-        handles.append(plt.Line2D([], [], marker='o', linestyle='None', markersize=6, color=color_map[lab], label=f"mode ({lab})" if lab != "-1,-1,-1,-1" else "mode ?"))
-        labels_.append(f"mode ({lab})" if lab != "-1,-1,-1,-1" else "mode ?")
-    legend_ax.legend(handles, labels_, loc="upper right", frameon=False, fontsize=8)
-
-    fig.tight_layout()
-    return fig
-"""
 
 @lru_cache(maxsize=20000)
 def eval_count_and_mode_cached(
