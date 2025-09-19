@@ -17,17 +17,16 @@ from few.waveform import FastSchwarzschildEccentricFlux
 # Observation / integration granularity — coarser values make FEW runs much faster.
 DT_SEC = 100.0         # seconds per sample
 T_YEARS = 0.1       # total duration in years
-THR_SNR = 17.       # absolute per-mode SNR threshold (keep modes with SNR >= THR_SNR)
+THR_SNR = 10.       # absolute per-mode SNR threshold (keep modes with SNR >= THR_SNR)
 RANDOM_SEED = 123
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 1_024    # total random samples over the full prior hyper-rectangle
+SCAN_SAMPLES = 2**int(np.log2(2_000))   # total random samples over the full prior hyper-rectangle
 
 SAVE_PREFIX = "one_mode_map"  # output prefix for CSV and PNG
 
 # --- Plotting & storage controls ---
 # Shared plotting layout for corner
-SELECT_COLS = [0, 1, 3, 4]  # indices -> (log10_m1, log10_m2, e0, p0)
 LABELS = [r"$\log_{10} M_1$", r"$\log_{10} M_2$", r"$e_0$", r"$p_0$"]
 
 # Parameter ranges (intrinsic)
@@ -126,23 +125,40 @@ def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED):
         n, mode_tuple = eval_count_and_mode_cached(lm1, lm2, u, e0, THR_SNR)
         if n == 1.0:
             p0 = _p0_from_u(u, e0)
-            keep.append((lm1, lm2, u, e0, p0))
+            keep.append((lm1, lm2, e0, p0))
             modes_rec.append(mode_tuple)
 
     if not keep:
-        return np.empty((0, 5), float), np.empty((0, 4), int)
+        return np.empty((0, 4), float), np.empty((0, 4), int)
     return np.array(keep, float), np.array(modes_rec, int)
 
+# once: uv add seaborn pandas
+def make_scatter_corner(pts, mode_indices):
+    import pandas as pd, seaborn as sns, numpy as np, matplotlib.pyplot as plt
+    cols = ["log10_m1","log10_m2","e0","p0"]
+    df = pd.DataFrame(pts, columns=cols)
+    df["mode"] = [f"{l},{m},{k},{n}" for (l,m,k,n) in mode_indices]
 
+    # keep legend small
+    top = set(df["mode"].value_counts().index[:12])
+    df["mode_plot"] = np.where(df["mode"].isin(top), df["mode"], "other")
+
+    g = sns.PairGrid(df, vars=cols, hue="mode_plot", corner=True, height=2.6, diag_sharey=False)
+    g.map_lower(sns.scatterplot, s=8, alpha=0.55, linewidth=0)   # no black edges
+    g.map_diag(sns.histplot, bins=40, element="step", fill=False, linewidth=1.0)
+
+    g.add_legend(frameon=False, title="mode", labelspacing=0.3, handlelength=0.8)
+    plt.tight_layout()
+    return g.fig
+"""
 def make_scatter_corner(
     pts: np.ndarray,
     mode_indices: np.ndarray,
 ):
-    """
+
     Corner-style scatter plot colored by the kept base mode (l,m,k,n).
     pts columns: [log10_m1, log10_m2, u, e0, p0]
-    """
-    X = pts[:, SELECT_COLS]
+
     labels = LABELS
     alpha = 0.15
     ms = 6
@@ -157,7 +173,7 @@ def make_scatter_corner(
     color_map = {lab: prop_cycle[i % len(prop_cycle)] for i, lab in enumerate(uniq)}
 
     fig = _corner.corner(
-        X,
+        pts,
         labels=labels,
         bins=50,
         plot_datapoints=False,
@@ -165,8 +181,17 @@ def make_scatter_corner(
         fill_contours=False,
         hist_bin_factor=2,
     )
-    axes = np.array(fig.axes).reshape(len(labels), len(labels))
+    axes = np.array(fig.axes).reshape(len(LABELS), len(LABELS))
 
+    # 1) clear ALL axes (diagonals + off-diagonals)
+    for ax in fig.axes:
+        ax.cla()
+
+    # 2) re-apply labels only on the outer row/col so the figure isn’t anonymous
+    for i in range(len(LABELS)):
+        axes[i, 0].set_ylabel(LABELS[i])
+        axes[-1, i].set_xlabel(LABELS[i])
+    
     # Off-diagonal scatter per category
     for i in range(len(labels)):
         for j in range(len(labels)):
@@ -177,7 +202,7 @@ def make_scatter_corner(
                     if not np.any(mask):
                         continue
                     ax.scatter(
-                        X[mask, j], X[mask, i],
+                        pts[mask, j], pts[mask, i],
                         s=ms, alpha=alpha, color=color_map[lab], rasterized=True
                     )
 
@@ -191,7 +216,7 @@ def make_scatter_corner(
 
     fig.tight_layout()
     return fig
-
+"""
 
 @lru_cache(maxsize=20000)
 def eval_count_and_mode_cached(
@@ -208,51 +233,34 @@ def eval_count_and_mode_cached(
     # Feasibility guard
     if not (10.0 <= p0 <= 16.0 + 2.0 * e0) or not (0.0 <= e0 <= 0.75):
         return float("inf"), (-1, -1, -1, -1)
-    try:
-        breakpoint()
-        # Ask FEW to also provide per-mode SNR and base (l,m,k,n) mapping
-        ret = few_noise_weighted(
-            m1,
-            m2,
-            p0,
-            float(e0),
-            THETA,
-            PHI,
-            T=T_YEARS,
-            snr_abs_threshold=float(thr),
-            dist=float(DIST_GPC),
-            dt=float(DT_SEC),
-            return_mode_snr=True,
-        )
-        
-        # (mode_snr, l_base, m_base, k_base, n_base)
-        n_kept = float(getattr(few_noise_weighted, "num_modes_kept", float("inf")))
-        mode_tuple = (-1, -1, -1, -1)
-        if isinstance(ret, tuple) and len(ret) >= 5:
-            mode_snr, l_base, m_base, k_base, n_base = ret[-5:]
-            try:
-                import numpy as _np
-                mask = _np.asarray(mode_snr) >= float(thr)
-                if int(mask.sum()) == 1 and n_kept == 1.0:
-                    idx = int(_np.where(mask)[0][0])
-                    mode_tuple = (int(l_base[idx]), int(m_base[idx]), int(k_base[idx]), int(n_base[idx]))
-            except Exception:
-                pass
-        return n_kept, mode_tuple
-    except Exception as e:
-        print(f"[eval-error] {e} @ (log10_m1={log10_m1}, log10_m2={log10_m2}, u={u}, e0={e0})")
-        return float("inf"), (-1, -1, -1, -1)
-
+    # Ask FEW to also provide per-mode SNR and base (l,m,k,n) mapping
+    ret = few_noise_weighted(
+        m1,
+        m2,
+        p0,
+        float(e0),
+        THETA,
+        PHI,
+        T=T_YEARS,
+        snr_abs_threshold=float(thr),
+        dist=float(DIST_GPC),
+        dt=float(DT_SEC),
+    )
+    
+    n_kept = few_noise_weighted.num_modes_kept
+    mode_tuple = (few_noise_weighted.ls,few_noise_weighted.ms,few_noise_weighted.ks,few_noise_weighted.ns)
+    return n_kept, mode_tuple
 
 def save_pts_csv(path, pts, mode_indices):
+    mode_indices = mode_indices.reshape(mode_indices.astype(float).shape[:2])
     arr = np.concatenate([pts, mode_indices.astype(float)], axis=1)
-    header = "log10_m1,log10_m2,u,e0,p0,l,m,k,n"
+    header = "log10_m1,log10_m2,e0,p0,l,m,k,n"
     np.savetxt(path, arr, delimiter=",", header=header, comments="")
 
 def load_pts_csv(path):
     data = np.genfromtxt(path, delimiter=",", names=True)
     get = lambda k: np.asarray(data[k])
-    pts = np.stack([get("log10_m1"), get("log10_m2"), get("u"), get("e0"), get("p0")], axis=1).astype(float)
+    pts = np.stack([get("log10_m1"), get("log10_m2"), get("e0"), get("p0")], axis=1).astype(float)
     mode_indices = np.stack([get("l"), get("m"), get("k"), get("n")], axis=1).astype(int)
     return pts, mode_indices
 
