@@ -5,24 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "corner>=2.2.3",
-    "ipykernel>=6.30.1",
-    "jupyter>=1.1.1",
     "matplotlib>=3.10.6",
     "numpy>=2.2.6",
-    "optuna>=4.5.0",
     "pandas>=2.3.2",
-    "scikit-learn>=1.7.2",
     "seaborn>=0.13.2",
     "tqdm>=4.67.1",
 ]
 
 [dependency-groups]
 dev = [
-    "black>=25.1.0",
     "fastemriwaveforms",
-    "pytest>=8.4.2",
-    "ruff>=0.13.0",
 ]
 
 [tool.uv.sources]

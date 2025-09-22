@@ -168,7 +168,7 @@ def eval_count_and_mode_cached(
     if not (10.0 <= p0 <= 16.0 + 2.0 * e0) or not (0.0 <= e0 <= 0.75):
         return float("inf"), (-1, -1, -1, -1)
     # Ask FEW to also provide per-mode SNR and base (l,m,k,n) mapping
-    ret = few_noise_weighted(
+    few_noise_weighted(
         m1,
         m2,
         p0,
@@ -180,13 +180,28 @@ def eval_count_and_mode_cached(
         dist=float(DIST_GPC),
         dt=float(DT_SEC),
     )
+    n_kept = int(few_noise_weighted.num_modes_kept)
+    try:
+        ls = few_noise_weighted.ls
+        ms = few_noise_weighted.ms
+        ks = few_noise_weighted.ks
+        ns = few_noise_weighted.ns
+    except Exception:
+        return float("inf"), (-1, -1, -1, -1)
     
-    n_kept = few_noise_weighted.num_modes_kept
-    mode_tuple = (few_noise_weighted.ls,few_noise_weighted.ms,few_noise_weighted.ks,few_noise_weighted.ns)
-    return n_kept, mode_tuple
+    if n_kept == 1 and len(ls) >= 1:
+        mode_tuple = (int(ls[0]), int(ms[0]), int(ks[0]), int(ns[0]))
+    else:
+        mode_tuple = (-1, -1, -1, -1)
+    return float(n_kept), mode_tuple
+
+
+    #n_kept = few_noise_weighted.num_modes_kept
+    #mode_tuple = (few_noise_weighted.ls,few_noise_weighted.ms,few_noise_weighted.ks,few_noise_weighted.ns)
+    #return n_kept, mode_tuple
 
 def save_pts_csv(path, pts, mode_indices):
-    mode_indices = mode_indices.reshape(mode_indices.astype(float).shape[:2])
+    #mode_indices = mode_indices.reshape(mode_indices.astype(float).shape[:2])
     arr = np.concatenate([pts, mode_indices.astype(float)], axis=1)
     header = "log10_m1,log10_m2,e0,p0,l,m,k,n"
     np.savetxt(path, arr, delimiter=",", header=header, comments="")
