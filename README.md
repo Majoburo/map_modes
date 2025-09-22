@@ -23,8 +23,6 @@ A curated plot is stored under `docs/` for display:
 
 ![Example scatter corner](docs/example_scatter_corner.png)
 
-The auto‑generated file `one_mode_map_corner_scatter.png` is `.gitignore`d to keep the repo lean.
-
 ---
 
 ## How it Works
