@@ -37,7 +37,7 @@ A curated plot is stored under `docs/` for display:
 
 ## Dependencies
 
-`numpy`, `scipy`, `matplotlib`, `tqdm`, `seaborn`, `pandas`
+`numpy`, `scipy`, `tqdm`, `seaborn`, `pandas`
 
 ---
 
