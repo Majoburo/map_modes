@@ -1,4 +1,3 @@
-import math
 import os
 import numpy as np
 from tqdm.auto import tqdm
@@ -31,8 +30,8 @@ SAVE_PREFIX = "one_mode_map"  # output prefix for CSV and PNG
 LABELS = [r"$\log_{10} M_1$", r"$\log_{10} M_2$", r"$e_0$", r"$p_0$"]
 
 # Parameter ranges (intrinsic)
-LOG10_M1_RANGE = (math.log10(5e5), math.log10(2e6))  # MBH mass
-LOG10_M2_RANGE = (math.log10(1e1), math.log10(1e2))  # compact object mass
+LOG10_M1_RANGE = (np.log10(5e5), np.log10(2e6))  # MBH mass
+LOG10_M2_RANGE = (np.log10(1e1), np.log10(1e2))  # compact object mass
 e0_RANGE = (0.0, 0.75)
 U_RANGE = (0.0, 1.0)  # maps to p0 via feasibility: p0 = 10 + u*(6 + 2 e0)
 
