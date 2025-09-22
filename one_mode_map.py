@@ -10,14 +10,15 @@ import seaborn as sns
 from few import get_file_manager
 from few.summation.interpolatedmodesum import CubicSplineInterpolant
 from few.waveform import FastSchwarzschildEccentricFlux
+from few.utils.constants import MRSUN_SI, Gpc
 
 # ----------------------------
 # Settings (edit these only)
 # ----------------------------
 # Observation / integration granularity — coarser values make FEW runs much faster.
-DT_SEC = 100.0      # seconds per sample
+DT_SEC = 10000.0      # seconds per sample
 T_YEARS = 0.1       # total duration in years
-THR_SNR = 10.       # absolute per-mode SNR threshold (keep modes with SNR >= THR_SNR)
+THR_SNR = 17.       # absolute per-mode SNR threshold (keep modes with SNR >= THR_SNR)
 RANDOM_SEED = 123
 
 # --- Mapping settings for 1-mode region ---
@@ -57,7 +58,8 @@ def build_few():
     PSD = np.asarray(noise["ASD"], float)**2
     sens_fn = ClippedInterpolant(CubicSplineInterpolant(f, PSD))
 
-    mode_selector_kwargs = {"sensitivity_fn": sens_fn, "dt": DT_SEC, "dist": DIST_GPC}
+    mode_selector_kwargs = {"sensitivity_fn": sens_fn}
+
     few_nw = FastSchwarzschildEccentricFlux(
         inspiral_kwargs={"DENSE_STEPPING": 0, "buffer_length": int(1e3)},
         amplitude_kwargs={"buffer_length": int(1e3)},
@@ -83,13 +85,15 @@ def eval_mode(m1: float, m2: float, p0: float, e0: float, thr: float):
     """
     few_nw = get_few()
     # Run the noise-weighted selection with absolute SNR threshold
+    mu = m1 * m2 / (m1 + m2)
+    dist_dimensionless = (DIST_GPC * Gpc) / (mu * MRSUN_SI)
     few_nw(
-        float(m1), float(m2), float(p0), float(e0),
+        m1, m2, p0, e0,
         THETA, PHI,
         T=T_YEARS,
-        snr_abs_threshold=float(thr),
         dist=float(DIST_GPC),
         dt=float(DT_SEC),
+        snr_abs_thr=thr*dist_dimensionless, #the SNR threshold is at source, need to multiply by distance for realistic SNR
     )
     n_kept = int(few_nw.num_modes_kept)
     ls = np.atleast_1d(few_nw.ls)
@@ -179,7 +183,8 @@ def eval_count_and_mode(
     # Ask FEW to provide number of kept modes and their (l,m,k,n)
     try:
         n_kept, ls, ms, ks, ns = eval_mode(m1, m2, p0, e0, thr)
-    except Exception:
+    except Exception as e:
+        print(e)
         return float("inf"), (-1, -1, -1, -1)
     
     if n_kept == 1 and len(ls) >= 1:
