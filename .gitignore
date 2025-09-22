@@ -15,3 +15,4 @@ wheels/
 # Outputs
 *.csv
 *.png
+!docs/*.png
