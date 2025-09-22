@@ -49,8 +49,6 @@ noise = np.genfromtxt(get_file_manager().get_file("LPA.txt"), names=True)
 f = np.asarray(noise["f"], dtype=np.float64)
 PSD = np.asarray(noise["ASD"], dtype=np.float64) ** 2
 
-
-sens_fn = CubicSplineInterpolant(f, PSD)
 class ClippedInterpolant:
     def __init__(self, base):
         self.base = base
@@ -61,7 +59,7 @@ class ClippedInterpolant:
         x = np.asarray(x)
         return self.base(np.clip(x, self._lo, self._hi))
 
-sens_fn = ClippedInterpolant(sens_fn)  # after you create the base interpolant
+sens_fn = ClippedInterpolant(CubicSplineInterpolant(f, PSD))
 
 inspiral_kwargs = {"DENSE_STEPPING": 0, "buffer_length": int(1e3)}
 amplitude_kwargs = {"buffer_length": int(1e3)}
