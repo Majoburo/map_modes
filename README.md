@@ -48,7 +48,6 @@ Optional: `seaborn`, `pandas` (for PairGrid‑based plotting)
 ## Notes
 
 - `fastemriwaveforms` is tracked as a dev dependency.
-- A curated example plot is under `docs/`, while generated plots are ignored.
 
 ---
 
