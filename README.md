@@ -28,7 +28,7 @@ A curated plot is stored under `docs/` for display:
 ## How it Works
 
 1. Sobol sampling across the prior space $(\log_{10}M_1, \log_{10}M_2, e_0, p_0)$.
-2. Evaluate per‑mode SNRs via FEW.
+2. Evaluate per‑mode SNRs via a custom FEW dev branch.
 3. Keep points with exactly one mode above threshold.
 4. Save surviving samples and mode indices.
 5. Render a scatter‑corner plot: histograms on diagonal, colored scatters off‑diagonal.
@@ -37,9 +37,7 @@ A curated plot is stored under `docs/` for display:
 
 ## Dependencies
 
-Core: `numpy`, `scipy`, `matplotlib`, `corner`, `tqdm`
-
-Optional: `seaborn`, `pandas` (for PairGrid‑based plotting)
+`numpy`, `scipy`, `matplotlib`, `tqdm`, `seaborn`, `pandas`
 
 ---
 
