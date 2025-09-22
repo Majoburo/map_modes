@@ -5,7 +5,6 @@ from tqdm.auto import tqdm
 from scipy.stats import qmc
 import pandas as pd
 import seaborn as sns
-import matplotlib.pyplot as plt
 
 
 from few import get_file_manager
@@ -160,8 +159,7 @@ def make_scatter_corner(pts, mode_indices):
     g.map_diag(sns.histplot, bins=40, element="step", fill=False, linewidth=1.0)
 
     g.add_legend(frameon=False, title="mode", labelspacing=0.3, handlelength=0.8)
-    plt.tight_layout()
-    return g.fig
+    return g
 
 
 def eval_count_and_mode(
