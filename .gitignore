@@ -14,3 +14,4 @@ wheels/
 
 # Outputs
 *.csv
+*.png
