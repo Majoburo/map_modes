@@ -1,0 +1,3 @@
+[submodule "FastEMRIWaveforms"]
+	path = FastEMRIWaveforms
+	url = git@github.com:majoburo/FastEMRIWaveforms.git
