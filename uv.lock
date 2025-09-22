@@ -189,7 +189,7 @@ wheels = [
 
 [[package]]
 name = "fastemriwaveforms"
-source = { editable = "../FastEMRIWaveforms" }
+source = { editable = "FastEMRIWaveforms" }
 dependencies = [
     { name = "h5py" },
     { name = "jsonschema" },
@@ -501,7 +501,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "fastemriwaveforms", editable = "../FastEMRIWaveforms" }]
+dev = [{ name = "fastemriwaveforms", editable = "FastEMRIWaveforms" }]
 
 [[package]]
 name = "markdown-it-py"

@@ -11,11 +11,10 @@ dependencies = [
     "tqdm>=4.67.1",
 ]
 
+# pyproject.toml should effectively resolve to:
 [dependency-groups]
-dev = [
-    "fastemriwaveforms",
-]
+dev = ["fastemriwaveforms"]
 
 [tool.uv.sources]
-fastemriwaveforms = { path = "../FastEMRIWaveforms", editable = true }
+fastemriwaveforms = { path = "FastEMRIWaveforms", editable = true }
 
