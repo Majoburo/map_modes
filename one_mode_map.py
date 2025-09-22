@@ -2,10 +2,12 @@ import math
 from functools import lru_cache
 import os
 import numpy as np
-import corner as _corner
 from tqdm.auto import tqdm as _tqdm
 from scipy.stats import qmc
+import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
+
 
 from few import get_file_manager
 from few.summation.interpolatedmodesum import CubicSplineInterpolant
@@ -134,7 +136,6 @@ def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED):
 
 # once: uv add seaborn pandas
 def make_scatter_corner(pts, mode_indices):
-    import pandas as pd, seaborn as sns, numpy as np, matplotlib.pyplot as plt
     cols = ["log10_m1","log10_m2","e0","p0"]
     df = pd.DataFrame(pts, columns=cols)
     df["mode"] = [f"{l},{m},{k},{n}" for (l,m,k,n) in mode_indices]
