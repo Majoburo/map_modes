@@ -1,8 +1,7 @@
 import math
-from functools import lru_cache
 import os
 import numpy as np
-from tqdm.auto import tqdm as _tqdm
+from tqdm.auto import tqdm
 from scipy.stats import qmc
 import pandas as pd
 import seaborn as sns
@@ -17,7 +16,7 @@ from few.waveform import FastSchwarzschildEccentricFlux
 # Settings (edit these only)
 # ----------------------------
 # Observation / integration granularity — coarser values make FEW runs much faster.
-DT_SEC = 100.0         # seconds per sample
+DT_SEC = 100.0      # seconds per sample
 T_YEARS = 0.1       # total duration in years
 THR_SNR = 10.       # absolute per-mode SNR threshold (keep modes with SNR >= THR_SNR)
 RANDOM_SEED = 123
@@ -42,13 +41,6 @@ THETA = np.pi / 3.0
 PHI = np.pi / 4.0
 DIST_GPC = 1.0
 
-# ----------------------------
-# FEW setup
-# ----------------------------
-noise = np.genfromtxt(get_file_manager().get_file("LPA.txt"), names=True)
-f = np.asarray(noise["f"], dtype=np.float64)
-PSD = np.asarray(noise["ASD"], dtype=np.float64) ** 2
-
 class ClippedInterpolant:
     def __init__(self, base):
         self.base = base
@@ -59,29 +51,54 @@ class ClippedInterpolant:
         x = np.asarray(x)
         return self.base(np.clip(x, self._lo, self._hi))
 
-sens_fn = ClippedInterpolant(CubicSplineInterpolant(f, PSD))
+def build_few():
+    """Create and return the FEW object and any derived helpers."""
+    noise = np.genfromtxt(get_file_manager().get_file("LPA.txt"), names=True)
+    f = np.asarray(noise["f"], float)
+    PSD = np.asarray(noise["ASD"], float)**2
+    sens_fn = ClippedInterpolant(CubicSplineInterpolant(f, PSD))
 
-inspiral_kwargs = {"DENSE_STEPPING": 0, "buffer_length": int(1e3)}
-amplitude_kwargs = {"buffer_length": int(1e3)}
-Ylm_kwargs = {"include_minus_m": False}
-sum_kwargs = {"pad_output": False}
-mode_selector_kwargs = {"sensitivity_fn": sens_fn, "dt": DT_SEC, "dist": DIST_GPC }
+    mode_selector_kwargs = {"sensitivity_fn": sens_fn, "dt": DT_SEC, "dist": DIST_GPC}
+    few_nw = FastSchwarzschildEccentricFlux(
+        inspiral_kwargs={"DENSE_STEPPING": 0, "buffer_length": int(1e3)},
+        amplitude_kwargs={"buffer_length": int(1e3)},
+        Ylm_kwargs={"include_minus_m": False},
+        sum_kwargs={"pad_output": False},
+        mode_selector_kwargs=mode_selector_kwargs,
+    )
+    return few_nw
 
-few_noise_weighted = FastSchwarzschildEccentricFlux(
-    inspiral_kwargs=inspiral_kwargs,
-    amplitude_kwargs=amplitude_kwargs,
-    Ylm_kwargs=Ylm_kwargs,
-    sum_kwargs=sum_kwargs,
-    mode_selector_kwargs=mode_selector_kwargs,
-)
+# Lazy singleton FEW instance so imports don't do heavy work
+_FEW = None
 
-print(
-    f"[diag] dt={DT_SEC:.1f}s, T={T_YEARS:.4f}yr → ~{int(T_YEARS*31557600/DT_SEC):,} samples/call"
-)
+def get_few():
+    global _FEW
+    if _FEW is None:
+        _FEW = build_few()
+    return _FEW
 
-# ----------------------------
-# Black-box evaluator with caching
-# ----------------------------
+
+def eval_mode(m1: float, m2: float, p0: float, e0: float, thr: float):
+    """Call FEW once and return (num_kept, ls, ms, ks, ns).
+    Arrays may be empty if no modes are kept.
+    """
+    few_nw = get_few()
+    # Run the noise-weighted selection with absolute SNR threshold
+    few_nw(
+        float(m1), float(m2), float(p0), float(e0),
+        THETA, PHI,
+        T=T_YEARS,
+        snr_abs_threshold=float(thr),
+        dist=float(DIST_GPC),
+        dt=float(DT_SEC),
+    )
+    n_kept = int(few_nw.num_modes_kept)
+    ls = np.atleast_1d(few_nw.ls)
+    ms = np.atleast_1d(few_nw.ms)
+    ks = np.atleast_1d(few_nw.ks)
+    ns = np.atleast_1d(few_nw.ns)
+    return n_kept, ls, ms, ks, ns
+
 
 def _p0_from_u(u: float, e0: float) -> float:
     return 10.0 + float(u) * (6.0 + 2.0 * float(e0))
@@ -113,7 +130,7 @@ def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED):
 
     # First, uniform sampling over the full box
     l1, l2, uu, ee0 = _sample_uniform(n_samples, rng)
-    for i in _tqdm(range(n_samples), desc="[scan] uniform", total=n_samples, leave=False):
+    for i in tqdm(range(n_samples), desc="[scan] uniform", total=n_samples, leave=False):
         lm1 = round(float(l1[i]), 6)
         lm2 = round(float(l2[i]), 6)
         u = round(float(uu[i]), 6)
@@ -122,7 +139,7 @@ def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED):
         if key in seen:
             continue
         seen.add(key)
-        n, mode_tuple = eval_count_and_mode_cached(lm1, lm2, u, e0, THR_SNR)
+        n, mode_tuple = eval_count_and_mode(lm1, lm2, u, e0, THR_SNR)
         if n == 1.0:
             p0 = _p0_from_u(u, e0)
             keep.append((lm1, lm2, e0, p0))
@@ -132,7 +149,7 @@ def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED):
         return np.empty((0, 4), float), np.empty((0, 4), int)
     return np.array(keep, float), np.array(modes_rec, int)
 
-# once: uv add seaborn pandas
+
 def make_scatter_corner(pts, mode_indices):
     cols = ["log10_m1","log10_m2","e0","p0"]
     df = pd.DataFrame(pts, columns=cols)
@@ -150,8 +167,8 @@ def make_scatter_corner(pts, mode_indices):
     plt.tight_layout()
     return g.fig
 
-@lru_cache(maxsize=20000)
-def eval_count_and_mode_cached(
+
+def eval_count_and_mode(
     log10_m1: float, log10_m2: float, u: float, e0: float, thr: float
 ) -> tuple[float, tuple[int, int, int, int]]:
     """
@@ -165,25 +182,9 @@ def eval_count_and_mode_cached(
     # Feasibility guard
     if not (10.0 <= p0 <= 16.0 + 2.0 * e0) or not (0.0 <= e0 <= 0.75):
         return float("inf"), (-1, -1, -1, -1)
-    # Ask FEW to also provide per-mode SNR and base (l,m,k,n) mapping
-    few_noise_weighted(
-        m1,
-        m2,
-        p0,
-        float(e0),
-        THETA,
-        PHI,
-        T=T_YEARS,
-        snr_abs_threshold=float(thr),
-        dist=float(DIST_GPC),
-        dt=float(DT_SEC),
-    )
-    n_kept = int(few_noise_weighted.num_modes_kept)
+    # Ask FEW to provide number of kept modes and their (l,m,k,n)
     try:
-        ls = few_noise_weighted.ls
-        ms = few_noise_weighted.ms
-        ks = few_noise_weighted.ks
-        ns = few_noise_weighted.ns
+        n_kept, ls, ms, ks, ns = eval_mode(m1, m2, p0, e0, thr)
     except Exception:
         return float("inf"), (-1, -1, -1, -1)
     
@@ -194,15 +195,12 @@ def eval_count_and_mode_cached(
     return float(n_kept), mode_tuple
 
 
-    #n_kept = few_noise_weighted.num_modes_kept
-    #mode_tuple = (few_noise_weighted.ls,few_noise_weighted.ms,few_noise_weighted.ks,few_noise_weighted.ns)
-    #return n_kept, mode_tuple
-
 def save_pts_csv(path, pts, mode_indices):
     #mode_indices = mode_indices.reshape(mode_indices.astype(float).shape[:2])
     arr = np.concatenate([pts, mode_indices.astype(float)], axis=1)
     header = "log10_m1,log10_m2,e0,p0,l,m,k,n"
     np.savetxt(path, arr, delimiter=",", header=header, comments="")
+
 
 def load_pts_csv(path):
     data = np.genfromtxt(path, delimiter=",", names=True)
@@ -213,6 +211,7 @@ def load_pts_csv(path):
 
 
 def main():
+    print(f"[diag] dt={DT_SEC:.1f}s, T={T_YEARS:.4f}yr → ~{int(T_YEARS*31557600/DT_SEC):,} samples/call")
     csv_path = f"{SAVE_PREFIX}.csv"
     if os.path.exists(csv_path):
         print(f"[replot] Using {csv_path}")
