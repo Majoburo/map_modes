@@ -126,7 +126,6 @@ def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED):
     rng = np.random.default_rng(seed)
     keep = []
     modes_rec = []
-    seen = set()
 
     # First, uniform sampling over the full box
     l1, l2, uu, ee0 = _sample_uniform(n_samples, rng)
@@ -135,10 +134,7 @@ def random_scan_one_mode(n_samples: int, seed: int = RANDOM_SEED):
         lm2 = round(float(l2[i]), 6)
         u = round(float(uu[i]), 6)
         e0 = round(float(ee0[i]), 6)
-        key = (lm1, lm2, u, e0)
-        if key in seen:
-            continue
-        seen.add(key)
+
         n, mode_tuple = eval_count_and_mode(lm1, lm2, u, e0, THR_SNR)
         if n == 1.0:
             p0 = _p0_from_u(u, e0)
@@ -196,7 +192,6 @@ def eval_count_and_mode(
 
 
 def save_pts_csv(path, pts, mode_indices):
-    #mode_indices = mode_indices.reshape(mode_indices.astype(float).shape[:2])
     arr = np.concatenate([pts, mode_indices.astype(float)], axis=1)
     header = "log10_m1,log10_m2,e0,p0,l,m,k,n"
     np.savetxt(path, arr, delimiter=",", header=header, comments="")
@@ -204,9 +199,8 @@ def save_pts_csv(path, pts, mode_indices):
 
 def load_pts_csv(path):
     data = np.genfromtxt(path, delimiter=",", names=True)
-    get = lambda k: np.asarray(data[k])
-    pts = np.stack([get("log10_m1"), get("log10_m2"), get("e0"), get("p0")], axis=1).astype(float)
-    mode_indices = np.stack([get("l"), get("m"), get("k"), get("n")], axis=1).astype(int)
+    pts = np.stack([data["log10_m1"], data["log10_m2"], data["e0"], data["p0"]], axis=1).astype(float)
+    mode_indices = np.stack([data["l"], data["m"], data["k"], data["n"]], axis=1).astype(int)
     return pts, mode_indices
 
 
