@@ -20,7 +20,7 @@ THR_SNR = 17.       # absolute per-mode SNR threshold (keep modes with SNR >= TH
 RANDOM_SEED = 123
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(2_000_000))   # total random samples over the full prior hyper-rectangle, need to be a power of 2 for Sobol to work well
+SCAN_SAMPLES = 2**int(np.log2(2_000))   # total random samples over the full prior hyper-rectangle, need to be a power of 2 for Sobol to work well
 
 SAVE_PREFIX = "one_mode_map_kerr"  # output prefix for HDF5 and PNG
 
