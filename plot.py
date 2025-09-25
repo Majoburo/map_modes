@@ -7,12 +7,6 @@ from matplotlib import pyplot as plt
 
 SAVE_PREFIX = "one_mode_map_kerr"  # output prefix for HDF5 and PNG
 
-# --- Contour settings ---
-ENABLE_CONTOURS = True       # set False to disable
-CONTOUR_LEVELS = 6           # number of contour levels
-CONTOUR_THRESH = 0.02        # density threshold for showing contours (0..1)
-KDE_BW_METHOD = "scott"      # seaborn/matplotlib bw method: "scott", "silverman", or float
-
 def make_scatter_corner(pts, mode_indices):
     cols = ["log10_m1","log10_m2","a","p0","e0"]
     if pts.size == 0:
@@ -28,31 +22,18 @@ def make_scatter_corner(pts, mode_indices):
     g = sns.PairGrid(df, vars=cols, hue="mode_plot", corner=True, height=2.6, diag_sharey=False)
 
     # base scatter
-    g.map_lower(sns.scatterplot, s=1, alpha=0.35, linewidth=0)
-
-    # optional KDE contour overlays (per-hue)
-    if ENABLE_CONTOURS:
-        g.map_lower(
-            sns.kdeplot,
-            levels=CONTOUR_LEVELS,
-            thresh=CONTOUR_THRESH,
-            fill=False,
-            bw_method=KDE_BW_METHOD,
-            linewidths=0.8,
-        )
-
+    g.map_lower(sns.scatterplot, s=1, alpha=0.15, linewidth=0, rasterized=True)
     # diagonal histograms
     g.map_diag(sns.histplot, bins=40, element="step", fill=False, linewidth=1.0)
 
-    # tidy legend
-    leg = g.add_legend(frameon=False, title="mode", labelspacing=0.3, handlelength=0.8)
-    if leg is not None:
-        for lh in leg.legendHandles:
-            try:
-                lh.set_alpha(0.9)
-                lh.set_linewidth(1.2)
-            except Exception:
-                pass
+    # tidy legend (robust across seaborn versions)
+    g.add_legend(frameon=False, title="mode", labelspacing=0.3, handlelength=0.8, markerscale=8.0)
+    legend = getattr(g, "_legend", None)
+    for lh in legend.legend_handles:
+        try:
+            lh.set_alpha(0.9)
+        except Exception:
+            pass
     return g
 
 
