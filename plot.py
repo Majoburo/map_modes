@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import h5py
-from matplotlib import pyplot as plt
 
 SAVE_PREFIX = "one_mode_map_kerr"  # output prefix for HDF5 and PNG
 

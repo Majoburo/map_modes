@@ -1,8 +1,9 @@
 import os
-import numpy as np
+
 from tqdm.auto import tqdm
 from scipy.stats import qmc
 import h5py
+import numpy as np
 
 from few import get_file_manager
 from few.summation.interpolatedmodesum import CubicSplineInterpolant
@@ -19,7 +20,7 @@ THR_SNR = 17.       # absolute per-mode SNR threshold (keep modes with SNR >= TH
 RANDOM_SEED = 123
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(2_000_000))   # total random samples over the full prior hyper-rectangle, need to be a power of two for Sobol to work well
+SCAN_SAMPLES = 2**int(np.log2(2_000_000))   # total random samples over the full prior hyper-rectangle, need to be a power of 2 for Sobol to work well
 
 SAVE_PREFIX = "one_mode_map_kerr"  # output prefix for HDF5 and PNG
 
@@ -31,11 +32,12 @@ a_RANGE = (0.0, 0.999)
 e0_RANGE = (0.0, 0.75)
 xI = 1 # Prograde orbits
 p0_RANGE = (7.5, 17)
+THETA_RANGE = (0.0, np.pi)
+PHI_RANGE   = (0.0, 2.0*np.pi)
 
-# Fixed angles / distance (edit if desired)
-THETA = np.pi / 3.0
-PHI = np.pi / 4.0
+# Fixed distance 
 DIST_GPC = 1.0
+
 
 class ClippedInterpolant:
     def __init__(self, base):
@@ -75,7 +77,7 @@ def get_few():
     return _FEW
 
 
-def eval_mode(m1: float, m2: float, a: float,  p0: float, e0: float, thr: float):
+def eval_mode(m1: float, m2: float, a: float,  p0: float, e0: float, theta: float, phi: float, thr: float):
     """Call FEW once and return (num_kept, ls, ms, ks, ns).
     Arrays may be empty if no modes are kept.
     """
@@ -85,7 +87,7 @@ def eval_mode(m1: float, m2: float, a: float,  p0: float, e0: float, thr: float)
     dist_dimensionless = (DIST_GPC * Gpc) / (mu * MRSUN_SI)
     few_nw(
         m1, m2, a, p0, e0, xI,
-        THETA, PHI,
+        theta, phi,
         T=T_YEARS,
         dist=float(DIST_GPC),
         dt=float(DT_SEC),
@@ -100,7 +102,7 @@ def eval_mode(m1: float, m2: float, a: float,  p0: float, e0: float, thr: float)
 
 
 def _sample_uniform(n, sobol_seed, n_skip=0):
-    sampler = qmc.Sobol(d=5, scramble=True, seed=int(sobol_seed))
+    sampler = qmc.Sobol(d=7, scramble=True, seed=int(sobol_seed))
     if n_skip:
         sampler.fast_forward(int(n_skip))
     X = sampler.random(n)
@@ -109,44 +111,66 @@ def _sample_uniform(n, sobol_seed, n_skip=0):
     a  = a_RANGE[0]        + X[:,2]*(a_RANGE[1]-a_RANGE[0])
     p0 = p0_RANGE[0]       + X[:,3]*(p0_RANGE[1]-p0_RANGE[0])
     e0 = e0_RANGE[0]       + X[:,4]*(e0_RANGE[1]-e0_RANGE[0])
-    return l1, l2, a, p0, e0
+    th = THETA_RANGE[0] + X[:,5]*(THETA_RANGE[1]-THETA_RANGE[0])
+    ph = PHI_RANGE[0]   + X[:,6]*(PHI_RANGE[1]-PHI_RANGE[0])
+    return l1, l2, a, p0, e0, th, ph
+
+
+def _count_and_filter(chunk_arrays, thr):
+    """Evaluate a chunk in-process and keep only 1-mode points.
+    chunk_arrays is a tuple of 7 same-length 1D arrays: (l1,l2,a,p0,e0,th,ph).
+    Returns (pts_chunk, modes_chunk) where pts_chunk is (M,7), modes_chunk is (M,4).
+    """
+    # Ensure FEW is initialized in this process
+    _ = get_few()
+    l1,l2,aa,pp0,ee0,thh,phh = chunk_arrays
+    keep = []
+    modes_rec = []
+    pbar = tqdm(total=len(l1), desc="[scan] samples", unit="pts", leave=False)
+    for i in range(len(l1)):
+        lm1 = float(l1[i]); lm2 = float(l2[i])
+        a   = float(aa[i]);  p0  = float(pp0[i]); e0 = float(ee0[i])
+        theta = float(thh[i]); phi = float(phh[i])
+        try:
+            n, mode_tuple = eval_count_and_mode(lm1, lm2, a, p0, e0, theta, phi, thr)
+        except Exception:
+            pbar.update(1)
+            continue
+        if n == 1:
+            keep.append((lm1, lm2, a, p0, e0, theta, phi))
+            modes_rec.append(mode_tuple)
+        pbar.update(1)
+    pbar.close()
+    if keep:
+        return np.array(keep, float), np.array(modes_rec, int)
+    else:
+        return np.empty((0,7), float), np.empty((0,4), int)
 
 
 def random_scan_one_mode(n_samples: int, sobol_seed: int, sobol_n_skip: int):
     """
-    Randomly sample the full parameter box and keep parameter tuples where the
-    evaluator returns exactly one kept mode.
+    Sobol sampling over the full parameter box, keeping tuples where
+    the evaluator returns exactly one kept mode.
 
     Returns:
-        pts:          float array (N, 5): [log10_m1, log10_m2, a, p0, e0]
+        pts:          float array (N, 7): [log10_m1, log10_m2, a, p0, e0, theta, phi]
         mode_indices: int array (N, 4): kept base mode (l,m,k,n) for each point
+        sobol_seed:   unchanged seed
+        sobol_n_done: updated count including this call
     """
-    keep = []
-    modes_rec = []
-    l1,l2,aa,pp0,ee0 = _sample_uniform(n_samples, sobol_seed, n_skip=sobol_n_skip)
-    for i in (pbar := tqdm(range(n_samples), desc="[scan] uniform", total=n_samples, leave=False)):
-        lm1 = round(float(l1[i]), 6)
-        lm2 = round(float(l2[i]), 6)
-        a = round(float(aa[i]), 6)
-        p0 = round(float(pp0[i]), 6)
-        e0 = round(float(ee0[i]), 6)
-        try:
-            n, mode_tuple = eval_count_and_mode(lm1, lm2, a, p0, e0, THR_SNR)
-        except Exception as e:
-            print(e)
-            continue
-        if n == 1:
-            keep.append((lm1, lm2, a, p0, e0)
-                        )
-            modes_rec.append(mode_tuple)
-        pbar.set_postfix(kept=len(keep))
-    if not keep:
-        return np.empty((0, 5), float), np.empty((0, 4), int), sobol_seed, sobol_n_skip + n_samples
-    return np.array(keep, float), np.array(modes_rec, int), sobol_seed, sobol_n_skip + n_samples
+    total = int(n_samples)
+
+    # Generate the full Sobol block at the proper offset
+    l1,l2,aa,pp0,ee0,thh,phh = _sample_uniform(total, sobol_seed, n_skip=sobol_n_skip)
+
+    # Single-process filter over the entire set
+    pts_out, modes_out = _count_and_filter((l1,l2,aa,pp0,ee0,thh,phh), THR_SNR)
+
+    return pts_out, modes_out, sobol_seed, sobol_n_skip + total
 
 
 def eval_count_and_mode(
-        log10_m1: float, log10_m2: float, a: float, p0: float, e0: float, thr: float
+        log10_m1: float, log10_m2: float, a: float, p0: float, e0: float, theta: float, phi: float, thr: float
 ) -> tuple[int, tuple[int, int, int, int]]:
     """
     Return (num_kept, (l,m,k,n)) where the tuple is the single kept base mode if num_kept==1,
@@ -156,7 +180,7 @@ def eval_count_and_mode(
     m2 = 10 ** float(log10_m2)
     # Ask FEW to provide number of kept modes and their (l,m,k,n)
     try:
-        n_kept, ls, ms, ks, ns = eval_mode(m1, m2, a, p0, e0, thr)
+        n_kept, ls, ms, ks, ns = eval_mode(m1, m2, a, p0, e0, theta, phi, thr)
     except Exception as e:
         print(e)
         return -1, (-1, -1, -1, -1)
@@ -193,7 +217,7 @@ def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, sobol_seed:
     """Append new rows to HDF5 and update run state as attributes."""
     with h5py.File(path, "a") as f:
         # Datasets live at root for simplicity
-        pts_ds = _ensure_dset(f, "pts", shape=(0, 5), dtype="f8", maxshape=(None, 5))
+        pts_ds = _ensure_dset(f, "pts", shape=(0, 7), dtype="f8", maxshape=(None, 7))
         modes_ds = _ensure_dset(f, "modes", shape=(0, 4), dtype="i4", maxshape=(None, 4))
         # Append
         _append_rows(pts_ds, np.asarray(pts, dtype=np.float64))
@@ -205,16 +229,16 @@ def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, sobol_seed:
         f.attrs["DT_SEC"] = float(DT_SEC)
         f.attrs["T_YEARS"] = float(T_YEARS)
         f.attrs["THR_SNR"] = float(THR_SNR)
-        f.attrs["columns_pts"] = np.array([b"log10_m1", b"log10_m2", b"a", b"p0", b"e0"], dtype="S")
+        f.attrs["columns_pts"] = np.array([b"log10_m1", b"log10_m2", b"a", b"p0", b"e0", b"theta", b"phi"], dtype="S")
         f.attrs["columns_modes"] = np.array([b"l", b"m", b"k", b"n"], dtype="S")
 
 
 def load_from_h5(path: str):
     """Return (pts, mode_indices, sobol_seed, sobol_n_done). Missing file ⇒ empty arrays and default seed/done."""
     if not os.path.exists(path):
-        return np.empty((0,5), float), np.empty((0,4), int), RANDOM_SEED, 0
+        return np.empty((0,7), float), np.empty((0,4), int), RANDOM_SEED, 0
     with h5py.File(path, "r") as f:
-        pts = np.asarray(f["pts"]) if "pts" in f else np.empty((0,5), float)
+        pts = np.asarray(f["pts"]) if "pts" in f else np.empty((0,7), float)
         modes = np.asarray(f["modes"]) if "modes" in f else np.empty((0,4), int)
         sobol_seed = int(f.attrs.get("SOBOL_SEED", RANDOM_SEED))
         sobol_n_done = int(f.attrs.get("SOBOL_N_DONE", 0))
@@ -251,7 +275,7 @@ def main():
             mode_indices = np.concatenate([mode_indices, newmode_indices], axis=0)
         else:
             # Still update state even if nothing appended (e.g., errors)
-            save_to_h5(h5_path, np.empty((0,5)), np.empty((0,4)), sobol_seed, sobol_n_done)
+            save_to_h5(h5_path, np.empty((0,7)), np.empty((0,4)), sobol_seed, sobol_n_done)
 
     print(f"[scan] Saved {len(pts)} total points → {h5_path}")
 
