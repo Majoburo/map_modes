@@ -3,9 +3,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import h5py
-from matplotlib import pyplot as plt
 
-SAVE_PREFIX = "one_mode_map_kerr"  # output prefix for HDF5 and PNG
+SAVE_PREFIX = "one_mode_map_kerr.keep"  # output prefix for HDF5 and PNG
 
 def make_scatter_corner(pts, mode_indices):
     cols = ["log10_m1","log10_m2","a","p0","e0"]
