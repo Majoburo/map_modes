@@ -7,7 +7,7 @@ import h5py
 SAVE_PREFIX = "one_mode_map_kerr"  # output prefix for HDF5 and PNG
 
 def make_scatter_corner(pts, mode_indices):
-    cols = ["log10_m1","log10_m2","a","p0","e0"]
+    cols = ["log10_m1","log10_m2","a","p0","e0","theta","phi"]
     if pts.size == 0:
         raise ValueError("No points in HDF5 yet; run the mapper first.")
 
@@ -39,7 +39,7 @@ def make_scatter_corner(pts, mode_indices):
 def load_from_h5(path: str):
     """Return (pts, mode_indices). Missing file ⇒ empty arrays."""
     if not os.path.exists(path):
-        return np.empty((0,5), float), np.empty((0,4), int)
+        return np.empty((0,7), float), np.empty((0,4), int)
     with h5py.File(path, "r") as f:
         pts = np.asarray(f["pts"]) if "pts" in f else np.empty((0,5), float)
         modes = np.asarray(f["modes"]) if "modes" in f else np.empty((0,4), int)
