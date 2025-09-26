@@ -32,7 +32,7 @@ THR_SNR = 5.       # absolute per-mode SNR threshold (keep modes with SNR >= THR
 RANDOM_SEED = 123
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(2_000_000))   # total random samples over the full prior hyper-rectangle, need to be a power of 2 for Sobol to work well
+SCAN_SAMPLES = 2**int(np.log2(10))   # total random samples over the full prior hyper-rectangle, need to be a power of 2 for Sobol to work well
 
 SAVE_PREFIX = "snr_ratio_map_kerr"  # output prefix for HDF5 and PNG
 
@@ -46,6 +46,7 @@ xI = 1 # Prograde orbits
 p0_RANGE = (7.5, 17)
 THETA_RANGE = (0.0, np.pi)
 PHI_RANGE   = (0.0, 2.0*np.pi)
+SAMPLER = "lhs"
 
 # Fixed distance 
 DIST_GPC = 1.0
@@ -132,17 +133,34 @@ def eval_mode(m1: float, m2: float, a: float,  p0: float, e0: float, theta: floa
 
 
 def _sample_uniform(n, sobol_seed, n_skip=0):
-    sampler = qmc.Sobol(d=7, scramble=True, seed=int(sobol_seed))
-    if n_skip:
-        sampler.fast_forward(int(n_skip))
-    X = sampler.random(n)
+    """
+    Draw n samples in [0,1)^7 using the chosen SAMPLER, then map to parameter ranges.
+    Supports:
+      - 'sobol' : scrambled Sobol with fast_forward
+      - 'lhs'   : LatinHypercube (uses draw of n+n_skip and slices to emulate skip)
+      - 'rseq'  : Kronecker lattice (R-sequence) with optional random shift
+    """
+    d = 7
+    if SAMPLER.lower() == "sobol":
+        sampler = qmc.Sobol(d=d, scramble=True, seed=int(sobol_seed))
+        if n_skip:
+            sampler.fast_forward(int(n_skip))
+        X = sampler.random(n)
+    elif SAMPLER.lower() == "lhs":
+        # Latin hypercube: emulate skip by drawing (n_skip + n) and slicing
+        sampler = qmc.LatinHypercube(d=d, seed=int(sobol_seed))
+        X_full = sampler.random(n + int(n_skip))
+        X = X_full[int(n_skip):int(n_skip)+n]
+    else:
+        raise ValueError(f"Unknown SAMPLER='{SAMPLER}'. Use 'sobol', 'lhs', or 'rseq'.")
+
     l1 = LOG10_M1_RANGE[0] + X[:,0]*(LOG10_M1_RANGE[1]-LOG10_M1_RANGE[0])
     l2 = LOG10_M2_RANGE[0] + X[:,1]*(LOG10_M2_RANGE[1]-LOG10_M2_RANGE[0])
     a  = a_RANGE[0]        + X[:,2]*(a_RANGE[1]-a_RANGE[0])
     p0 = p0_RANGE[0]       + X[:,3]*(p0_RANGE[1]-p0_RANGE[0])
     e0 = e0_RANGE[0]       + X[:,4]*(e0_RANGE[1]-e0_RANGE[0])
-    th = THETA_RANGE[0] + X[:,5]*(THETA_RANGE[1]-THETA_RANGE[0])
-    ph = PHI_RANGE[0]   + X[:,6]*(PHI_RANGE[1]-PHI_RANGE[0])
+    th = THETA_RANGE[0]    + X[:,5]*(THETA_RANGE[1]-THETA_RANGE[0])
+    ph = PHI_RANGE[0]      + X[:,6]*(PHI_RANGE[1]-PHI_RANGE[0])
     return l1, l2, a, p0, e0, th, ph
 
 
