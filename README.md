@@ -7,8 +7,10 @@ This project explores regions of EMRI parameter space where **exactly one GW mod
 ## Quickstart
 
 ```bash
+git clone --recursive --depth=1 git@github.com:Majoburo/map_modes.git
+cd map_modes
 uv sync
-uv run python one_mode_map.py
+source .venv/bin/activate
 ```
 
 Outputs:
