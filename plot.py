@@ -4,7 +4,7 @@ import pandas as pd
 import seaborn as sns
 import h5py
 
-SAVE_PREFIX = "one_mode_map_kerr"  # output prefix for HDF5 and PNG
+SAVE_PREFIX = "snr_ratio_map_kerr_lhs"  # output prefix for HDF5 and PNG
 
 def make_scatter_corner(pts, mode_indices):
     cols = ["log10_m1","log10_m2","a","p0","e0","theta","phi"]
@@ -21,7 +21,7 @@ def make_scatter_corner(pts, mode_indices):
     g = sns.PairGrid(df, vars=cols, hue="mode_plot", corner=True, height=2.6, diag_sharey=False)
 
     # base scatter
-    g.map_lower(sns.scatterplot, s=1, alpha=0.15, linewidth=0, rasterized=True)
+    g.map_lower(sns.scatterplot, s=8, alpha=0.25, linewidth=0, rasterized=True)
     # diagonal histograms
     g.map_diag(sns.histplot, bins=40, element="step", fill=False, linewidth=1.0)
 
