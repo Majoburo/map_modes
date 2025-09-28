@@ -12,6 +12,7 @@ def make_scatter_corner(pts, mode_indices):
         raise ValueError("No points in HDF5 yet; run the mapper first.")
 
     df = pd.DataFrame(pts, columns=cols)
+
     df["mode"] = [f"{l},{m},{k},{n}" for (l,m,k,n) in mode_indices]
 
     # keep legend small
@@ -21,9 +22,16 @@ def make_scatter_corner(pts, mode_indices):
     g = sns.PairGrid(df, vars=cols, hue="mode_plot", corner=True, height=2.6, diag_sharey=False)
 
     # base scatter
-    g.map_lower(sns.scatterplot, s=8, alpha=0.25, linewidth=0, rasterized=True)
+    #g.map_lower(sns.kdeplot, fill=False,          # contour lines only
+    #                levels=5,            # number of contour levels
+    #                thresh=0.05,         # hide ultra-low density noise
+    #                bw_method='scott',   # robust default; adjust if needed
+    #                gridsize=128,        # balance speed/quality
+    #                linewidths=1.0) 
+    g.map_lower(sns.scatterplot,s=1, alpha=0.55, linewidth=0, rasterized=True)
+    
     # diagonal histograms
-    g.map_diag(sns.histplot, bins=40, element="step", fill=False, linewidth=1.0)
+    g.map_diag(sns.histplot, bins=52, fill=True, linewidth=0.0)
 
     # tidy legend (robust across seaborn versions)
     g.add_legend(frameon=False, title="mode", labelspacing=0.3, handlelength=0.8, markerscale=8.0)
