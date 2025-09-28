@@ -18,7 +18,7 @@ THR_SNR = 5.       # absolute per-mode SNR threshold (keep modes with SNR >= THR
 RANDOM_SEED = 1344342
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(1_000_000))   # total random samples over the full prior hyper-rectangle, need to be a power of 2 for Sobol to work well
+SCAN_SAMPLES = 2**int(np.log2(1_000_000))   # total random samples over the full prior hyper-rectangle
 
 SAVE_PREFIX = "snr_ratio_sch"  # output prefix for HDF5 and PNG
 
@@ -96,7 +96,7 @@ def eval_mode(m1: float, m2: float,  p0: float, e0: float, theta: float, phi: fl
 
 def _sample_uniform(n, seed, n_skip=0):
     """
-    Draw n samples in [0,1)^6 using the chosen a lhc, then map to parameter ranges.
+    Draw n samples in [0,1)^6 using a latin hyper cube, then map to parameter ranges.
     """
     d = 6
     sampler = qmc.LatinHypercube(d=d, seed=int(seed))

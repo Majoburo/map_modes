@@ -19,11 +19,9 @@ THR_SNR = 5.       # absolute per-mode SNR threshold (keep modes with SNR >= THR
 RANDOM_SEED = 1344342
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(1_000_000))   # total random samples over the full prior hyper-rectangle, need to be a power of 2 for Sobol to work well
-# Sampling strategy: 'sobol' (current default), 'lhs' (Latin hypercube)
-SAMPLER = "lhs"
+SCAN_SAMPLES = 2**int(np.log2(1_000_000))   # total random samples over the full prior hyper-rectangle
 
-SAVE_PREFIX = "snr_ratio_map_kerr_lhs"  # output prefix for HDF5 and PNG
+SAVE_PREFIX = "snr_ratio_kerr"  # output prefix for HDF5 and PNG
 
 # --- Plotting & storage controls ---
 # Parameter ranges (intrinsic)
@@ -99,27 +97,15 @@ def eval_mode(m1: float, m2: float, a: float,  p0: float, e0: float, theta: floa
     return n_kept, ls, ms, ks, ns
 
 
-def _sample_uniform(n, sobol_seed, n_skip=0):
+def _sample_uniform(n, seed, n_skip=0):
     """
-    Draw n samples in [0,1)^7 using the chosen SAMPLER, then map to parameter ranges.
-    Supports:
-      - 'sobol' : scrambled Sobol with fast_forward
-      - 'lhs'   : LatinHypercube (uses draw of n+n_skip and slices to emulate skip)
-      - 'rseq'  : Kronecker lattice (R-sequence) with optional random shift
+    Draw n samples in [0,1)^7 using a latin hyper cube, then map to parameter ranges.
     """
     d = 7
-    if SAMPLER.lower() == "sobol":
-        sampler = qmc.Sobol(d=d, scramble=True, seed=int(sobol_seed))
-        if n_skip:
-            sampler.fast_forward(int(n_skip))
-        X = sampler.random(n)
-    elif SAMPLER.lower() == "lhs":
-        # Latin hypercube: emulate skip by drawing (n_skip + n) and slicing
-        sampler = qmc.LatinHypercube(d=d, seed=int(sobol_seed))
-        X_full = sampler.random(n + int(n_skip))
-        X = X_full[int(n_skip):int(n_skip)+n]
-    else:
-        raise ValueError(f"Unknown SAMPLER='{SAMPLER}'. Use 'sobol', 'lhs', or 'rseq'.")
+    sampler = qmc.LatinHypercube(d=d, seed=int(seed))
+    X_full = sampler.random(n + int(n_skip))
+    X = X_full[int(n_skip):int(n_skip)+n]
+
 
     l1 = LOG10_M1_RANGE[0] + X[:,0]*(LOG10_M1_RANGE[1]-LOG10_M1_RANGE[0])
     l2 = LOG10_M2_RANGE[0] + X[:,1]*(LOG10_M2_RANGE[1]-LOG10_M2_RANGE[0])
@@ -162,7 +148,7 @@ def _count_and_filter(chunk_arrays, thr):
         return np.empty((0,7), float), np.empty((0,4), int)
 
 
-def random_scan_one_mode(n_samples: int, sobol_seed: int, sobol_n_skip: int):
+def random_scan_one_mode(n_samples: int, seed: int, n_skip: int):
     """
     Sobol sampling over the full parameter box, keeping tuples where
     the evaluator returns exactly one kept mode.
@@ -170,18 +156,18 @@ def random_scan_one_mode(n_samples: int, sobol_seed: int, sobol_n_skip: int):
     Returns:
         pts:          float array (N, 7): [log10_m1, log10_m2, a, p0, e0, theta, phi]
         mode_indices: int array (N, 4): kept base mode (l,m,k,n) for each point
-        sobol_seed:   unchanged seed
-        sobol_n_done: updated count including this call
+        seed:   unchanged seed
+        n_done: updated count including this call
     """
     total = int(n_samples)
 
     # Generate the full Sobol block at the proper offset
-    l1,l2,aa,pp0,ee0,thh,phh = _sample_uniform(total, sobol_seed, n_skip=sobol_n_skip)
+    l1,l2,aa,pp0,ee0,thh,phh = _sample_uniform(total, seed, n_skip=n_skip)
 
     # Single-process filter over the entire set
     pts_out, modes_out = _count_and_filter((l1,l2,aa,pp0,ee0,thh,phh), THR_SNR)
 
-    return pts_out, modes_out, sobol_seed, sobol_n_skip + total
+    return pts_out, modes_out, seed, n_skip + total
 
 
 def eval_count_and_mode(
@@ -228,7 +214,7 @@ def _append_rows(dset: h5py.Dataset, rows: np.ndarray):
     dset[n_old:n_old + n_new, ...] = rows
 
 
-def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, sobol_seed: int, sobol_n_done: int):
+def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, seed: int, n_done: int):
     """Append new rows to HDF5 and update run state as attributes."""
     with h5py.File(path, "a") as f:
         # Datasets live at root for simplicity
@@ -238,8 +224,8 @@ def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, sobol_seed:
         _append_rows(pts_ds, np.asarray(pts, dtype=np.float64))
         _append_rows(modes_ds, np.asarray(mode_indices, dtype=np.int32))
         # Metadata/state
-        f.attrs["SOBOL_SEED"] = int(sobol_seed)
-        f.attrs["SOBOL_N_DONE"] = int(sobol_n_done)
+        f.attrs["SEED"] = int(seed)
+        f.attrs["N_DONE"] = int(n_done)
         # Helpful provenance
         f.attrs["DT_SEC"] = float(DT_SEC)
         f.attrs["T_YEARS"] = float(T_YEARS)
@@ -249,15 +235,15 @@ def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, sobol_seed:
 
 
 def load_from_h5(path: str):
-    """Return (pts, mode_indices, sobol_seed, sobol_n_done). Missing file ⇒ empty arrays and default seed/done."""
+    """Return (pts, mode_indices, seed, n_done). Missing file ⇒ empty arrays and default seed/done."""
     if not os.path.exists(path):
         return np.empty((0,7), float), np.empty((0,4), int), RANDOM_SEED, 0
     with h5py.File(path, "r") as f:
         pts = np.asarray(f["pts"]) if "pts" in f else np.empty((0,7), float)
         modes = np.asarray(f["modes"]) if "modes" in f else np.empty((0,4), int)
-        sobol_seed = int(f.attrs.get("SOBOL_SEED", RANDOM_SEED))
-        sobol_n_done = int(f.attrs.get("SOBOL_N_DONE", 0))
-        return pts, modes, sobol_seed, sobol_n_done
+        seed = int(f.attrs.get("SEED", RANDOM_SEED))
+        n_done = int(f.attrs.get("N_DONE", 0))
+        return pts, modes, seed, n_done
 
 
 # ----------------------------
@@ -269,28 +255,28 @@ def main():
     h5_path = f"{SAVE_PREFIX}.h5"
 
     # Load existing points & state if present
-    pts, mode_indices, sobol_seed, sobol_n_done = load_from_h5(h5_path)
+    pts, mode_indices, seed, n_done = load_from_h5(h5_path)
 
     if pts.size == 0:
         print("[scan] Mapping the 1‑mode region …")
-        newpts, newmode_indices, sobol_seed, sobol_n_done = random_scan_one_mode(SCAN_SAMPLES, RANDOM_SEED, 0)
+        newpts, newmode_indices, seed, n_done = random_scan_one_mode(SCAN_SAMPLES, RANDOM_SEED, 0)
         if newpts.size == 0:
             print("[scan] No 1‑mode points found. Increase SCAN_SAMPLES or lower THR_SNR.")
             return
-        save_to_h5(h5_path, newpts, newmode_indices, sobol_seed, sobol_n_done)
+        save_to_h5(h5_path, newpts, newmode_indices, seed, n_done)
         pts = newpts
         mode_indices = newmode_indices
     else:
         print(f"[replot] Using {h5_path}")
-        newpts, newmode_indices, sobol_seed, sobol_n_done = random_scan_one_mode(SCAN_SAMPLES, sobol_seed, sobol_n_done)
+        newpts, newmode_indices, seed, n_done = random_scan_one_mode(SCAN_SAMPLES, seed, n_done)
         if newpts.size > 0:
-            save_to_h5(h5_path, newpts, newmode_indices, sobol_seed, sobol_n_done)
+            save_to_h5(h5_path, newpts, newmode_indices, seed, n_done)
             # Concatenate for plotting this session (avoid full reload for speed)
             pts = np.concatenate([pts, newpts], axis=0)
             mode_indices = np.concatenate([mode_indices, newmode_indices], axis=0)
         else:
             # Still update state even if nothing appended (e.g., errors)
-            save_to_h5(h5_path, np.empty((0,7)), np.empty((0,4)), sobol_seed, sobol_n_done)
+            save_to_h5(h5_path, np.empty((0,7)), np.empty((0,4)), seed, n_done)
 
     print(f"[scan] Saved {len(pts)} total points → {h5_path}")
 
