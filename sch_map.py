@@ -1,0 +1,280 @@
+import os
+
+from tqdm.auto import tqdm
+from scipy.stats import qmc
+import h5py
+import numpy as np
+
+from few import get_file_manager
+from few.summation.interpolatedmodesum import CubicSplineInterpolant
+from few.waveform import FastSchwarzschildEccentricFlux
+# ----------------------------
+# Settings (edit these only)
+# ----------------------------
+# Observation / integration granularity — coarser values make FEW runs much faster.
+DT_SEC = 10.0      # seconds per sample
+T_YEARS = 0.1       # total duration in years
+THR_SNR = 5.       # absolute per-mode SNR threshold (keep modes with SNR >= THR_SNR)
+RANDOM_SEED = 1344342
+
+# --- Mapping settings for 1-mode region ---
+SCAN_SAMPLES = 2**int(np.log2(1_000_000))   # total random samples over the full prior hyper-rectangle, need to be a power of 2 for Sobol to work well
+
+SAVE_PREFIX = "snr_ratio_sch"  # output prefix for HDF5 and PNG
+
+# --- Plotting & storage controls ---
+# Parameter ranges (intrinsic)
+LOG10_M1_RANGE = (np.log10(5e5), np.log10(2e6))  # MBH mass
+LOG10_M2_RANGE = (np.log10(1e1), np.log10(1e2))  # compact object mass
+e0_RANGE = (0.0, 0.75)
+p0_RANGE = (7.5, 16)
+THETA_RANGE = (0.0, np.pi)
+PHI_RANGE   = (0.0, 2.0*np.pi)
+
+# Fixed distance 
+DIST_GPC = 1.0
+
+class ClippedInterpolant:
+    def __init__(self, base):
+        self.base = base
+        # FEW’s CubicSplineInterpolant stores t as shape (1, N)
+        self._lo = float(np.ravel(base.t)[0])
+        self._hi = float(np.ravel(base.t)[-1])
+    def __call__(self, x):
+        x = np.asarray(x)
+        return self.base(np.clip(x, self._lo, self._hi))
+
+def build_few():
+    """Create and return the FEW object and any derived helpers."""
+    noise = np.genfromtxt(get_file_manager().get_file("LPA.txt"), names=True)
+    f = np.asarray(noise["f"], float)
+    PSD = np.asarray(noise["ASD"], float)**2
+    sens_fn = ClippedInterpolant(CubicSplineInterpolant(f, PSD))
+
+    mode_selector_kwargs = {"sensitivity_fn": sens_fn}
+
+    few_nw = FastSchwarzschildEccentricFlux(
+        inspiral_kwargs={"DENSE_STEPPING": 0, "buffer_length": int(1e3)},
+        amplitude_kwargs={"buffer_length": int(1e3)},
+        Ylm_kwargs={"include_minus_m": False},
+        sum_kwargs={"pad_output": False},
+        mode_selector_kwargs=mode_selector_kwargs,
+    )
+    return few_nw
+
+# Lazy singleton FEW instance so imports don't do heavy work
+_FEW = None
+
+def get_few():
+    global _FEW
+    if _FEW is None:
+        _FEW = build_few()
+    return _FEW
+
+
+def eval_mode(m1: float, m2: float,  p0: float, e0: float, theta: float, phi: float, thr: float):
+    """Call FEW once and return (num_kept, ls, ms, ks, ns).
+    Arrays may be empty if no modes are kept.
+    """
+    few_nw = get_few()
+    # Run the noise-weighted selection with absolute SNR threshold
+    few_nw(
+        m1, m2, p0, e0,
+        theta, phi,
+        T=T_YEARS,
+        dist=float(DIST_GPC),
+        dt=float(DT_SEC),
+        snr_abs_thr=thr, # the SNR threshold is at source, multiply by distance for realistic SNR
+    )
+    n_kept = int(few_nw.num_modes_kept)
+    ls = np.atleast_1d(few_nw.ls)
+    ms = np.atleast_1d(few_nw.ms)
+    ks = np.atleast_1d(few_nw.ks)
+    ns = np.atleast_1d(few_nw.ns)
+    return n_kept, ls, ms, ks, ns
+
+
+def _sample_uniform(n, seed, n_skip=0):
+    """
+    Draw n samples in [0,1)^6 using the chosen a lhc, then map to parameter ranges.
+    """
+    d = 6
+    sampler = qmc.LatinHypercube(d=d, seed=int(seed))
+    X_full = sampler.random(n + int(n_skip))
+    X = X_full[int(n_skip):int(n_skip)+n]
+
+
+    l1 = LOG10_M1_RANGE[0] + X[:,0]*(LOG10_M1_RANGE[1]-LOG10_M1_RANGE[0])
+    l2 = LOG10_M2_RANGE[0] + X[:,1]*(LOG10_M2_RANGE[1]-LOG10_M2_RANGE[0])
+    p0 = p0_RANGE[0]       + X[:,2]*(p0_RANGE[1]-p0_RANGE[0])
+    e0 = e0_RANGE[0]       + X[:,3]*(e0_RANGE[1]-e0_RANGE[0])
+    th = THETA_RANGE[0]    + X[:,4]*(THETA_RANGE[1]-THETA_RANGE[0])
+    ph = PHI_RANGE[0]      + X[:,5]*(PHI_RANGE[1]-PHI_RANGE[0])
+    return l1, l2, p0, e0, th, ph
+
+
+def _count_and_filter(chunk_arrays, thr):
+    """Evaluate a chunk in-process and keep only 1-mode points.
+    chunk_arrays is a tuple of 6 same-length 1D arrays: (l1,l2,p0,e0,th,ph).
+    Returns (pts_chunk, modes_chunk) where pts_chunk is (M,6), modes_chunk is (M,4).
+    """
+    # Ensure FEW is initialized in this process
+    _ = get_few()
+    l1,l2,pp0,ee0,thh,phh = chunk_arrays
+    keep = []
+    modes_rec = []
+    pbar = tqdm(total=len(l1), desc="[scan] samples", unit="pts", leave=False)
+    for i in range(len(l1)):
+        lm1 = float(l1[i]); lm2 = float(l2[i])
+        theta = float(thh[i]); phi = float(phh[i])
+        p0 = float(pp0[i]); e0 = float(ee0[i])
+        try:
+            n, mode_tuple = eval_count_and_mode(lm1, lm2, p0, e0, theta, phi, thr)
+        except Exception:
+            pbar.update(1)
+            continue
+        if n == 1:
+            keep.append((lm1, lm2, p0, e0, theta, phi))
+            modes_rec.append(mode_tuple)
+        pbar.update(1)
+    pbar.close()
+    if keep:
+        return np.array(keep, float), np.array(modes_rec, int)
+    else:
+        return np.empty((0,6), float), np.empty((0,4), int)
+
+
+def random_scan_one_mode(n_samples: int, seed: int, n_skip: int):
+    """
+    Sobol sampling over the full parameter box, keeping tuples where
+    the evaluator returns exactly one kept mode.
+
+    Returns:
+        pts:          float array (N, 6): [log10_m1, log10_m2, p0, e0, theta, phi]
+        mode_indices: int array (N, 4): kept base mode (l,m,k,n) for each point
+        seed:   unchanged seed
+        n_done: updated count including this call
+    """
+    total = int(n_samples)
+
+    # Generate the full Sobol block at the proper offset
+    l1,l2,pp0,ee0,thh,phh = _sample_uniform(total, seed, n_skip=n_skip)
+
+    # Single-process filter over the entire set
+    pts_out, modes_out = _count_and_filter((l1,l2,pp0,ee0,thh,phh), THR_SNR)
+
+    return pts_out, modes_out, seed, n_skip + total
+
+
+def eval_count_and_mode(
+        log10_m1: float, log10_m2: float, p0: float, e0: float, theta: float, phi: float, thr: float
+) -> tuple[int, tuple[int, int, int, int]]:
+    """
+    Return (num_kept, (l,m,k,n)) where the tuple is the single kept base mode if num_kept==1,
+    or (-1,-1,-1,-1) otherwise. Returns (-1, (-1,-1,-1,-1)) on infeasible/error.
+    """
+    m1 = 10 ** float(log10_m1)
+    m2 = 10 ** float(log10_m2)
+    # Ask FEW to provide number of kept modes and their (l,m,k,n)
+    try:
+        n_kept, ls, ms, ks, ns = eval_mode(m1, m2, p0, e0, theta, phi, thr)
+    except Exception as e:
+        print(e)
+        return -1, (-1, -1, -1, -1)
+
+    if n_kept == 1 and len(ls) >= 1:
+        mode_tuple = (int(ls[0]), int(ms[0]), int(ks[0]), int(ns[0]))
+    else:
+        mode_tuple = (-1, -1, -1, -1)
+    return int(n_kept), mode_tuple
+
+
+# ----------------------------
+# HDF5 utilities
+# ----------------------------
+
+def _ensure_dset(f: h5py.File, name: str, shape, dtype, maxshape=(None,)):
+    if name in f:
+        return f[name]
+    # Choose a chunk size that is friendly to append (powers of two rows)
+    chunks = (max(1, min(4096, 1024)),) + tuple(shape[1:])
+    return f.create_dataset(name, shape=shape, maxshape=maxshape, dtype=dtype, chunks=chunks, compression="lzf")
+
+
+def _append_rows(dset: h5py.Dataset, rows: np.ndarray):
+    if rows.size == 0:
+        return
+    n_old = dset.shape[0]
+    n_new = rows.shape[0]
+    dset.resize((n_old + n_new,) + dset.shape[1:])
+    dset[n_old:n_old + n_new, ...] = rows
+
+
+def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, seed: int, n_done: int):
+    """Append new rows to HDF5 and update run state as attributes."""
+    with h5py.File(path, "a") as f:
+        # Datasets live at root for simplicity
+        pts_ds = _ensure_dset(f, "pts", shape=(0, 6), dtype="f8", maxshape=(None, 6))
+        modes_ds = _ensure_dset(f, "modes", shape=(0, 4), dtype="i4", maxshape=(None, 4))
+        # Append
+        _append_rows(pts_ds, np.asarray(pts, dtype=np.float64))
+        _append_rows(modes_ds, np.asarray(mode_indices, dtype=np.int32))
+        # Metadata/state
+        f.attrs["SEED"] = int(seed)
+        f.attrs["N_DONE"] = int(n_done)
+        # Helpful provenance
+        f.attrs["DT_SEC"] = float(DT_SEC)
+        f.attrs["T_YEARS"] = float(T_YEARS)
+        f.attrs["THR_SNR"] = float(THR_SNR)
+        f.attrs["columns_pts"] = np.array([b"log10_m1", b"log10_m2", b"p0", b"e0", b"theta", b"phi"], dtype="S")
+        f.attrs["columns_modes"] = np.array([b"l", b"m", b"k", b"n"], dtype="S")
+
+
+def load_from_h5(path: str):
+    """Return (pts, mode_indices, seed, n_done). Missing file ⇒ empty arrays and default seed/done."""
+    if not os.path.exists(path):
+        return np.empty((0,6), float), np.empty((0,4), int), RANDOM_SEED, 0
+    with h5py.File(path, "r") as f:
+        pts = np.asarray(f["pts"]) if "pts" in f else np.empty((0,6), float)
+        modes = np.asarray(f["modes"]) if "modes" in f else np.empty((0,4), int)
+        seed = int(f.attrs.get("SEED", RANDOM_SEED))
+        n_done = int(f.attrs.get("N_DONE", 0))
+        return pts, modes, seed, n_done
+
+
+# ----------------------------
+# Main
+# ----------------------------
+
+def main():
+    print(f"[diag] dt={DT_SEC:.1f}s, T={T_YEARS:.4f}yr → ~{int(T_YEARS*31557600/DT_SEC):,} samples/call")
+    h5_path = f"{SAVE_PREFIX}.h5"
+
+    # Load existing points & state if present
+    pts, mode_indices, seed, n_done = load_from_h5(h5_path)
+
+    if pts.size == 0:
+        print("[scan] Mapping the 1‑mode region …")
+        newpts, newmode_indices, seed, n_done = random_scan_one_mode(SCAN_SAMPLES, RANDOM_SEED, 0)
+        if newpts.size == 0:
+            print("[scan] No 1‑mode points found. Increase SCAN_SAMPLES or lower THR_SNR.")
+            return
+        save_to_h5(h5_path, newpts, newmode_indices, seed, n_done)
+        pts = newpts
+        mode_indices = newmode_indices
+    else:
+        print(f"[replot] Using {h5_path}")
+        newpts, newmode_indices, seed, n_done = random_scan_one_mode(SCAN_SAMPLES, seed, n_done)
+        if newpts.size > 0:
+            save_to_h5(h5_path, newpts, newmode_indices, seed, n_done)
+            # Concatenate for plotting this session (avoid full reload for speed)
+            pts = np.concatenate([pts, newpts], axis=0)
+            mode_indices = np.concatenate([mode_indices, newmode_indices], axis=0)
+        else:
+            # Still update state even if nothing appended (e.g., errors)
+            save_to_h5(h5_path, np.empty((0,6)), np.empty((0,4)), seed, n_done)
+
+    print(f"[scan] Saved {len(pts)} total points → {h5_path}")
+
+if __name__ == "__main__":
+    main()
