@@ -11,7 +11,7 @@ git clone --recurse-submodules git@github.com:Majoburo/map_modes.git
 cd map_modes
 uv sync
 uv run python kerr_map.py # sch_map.py for schwarzchild.
-
+```
 ⸻
 
 What it does
