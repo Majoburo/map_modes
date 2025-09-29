@@ -24,7 +24,7 @@ What it does
     - Observer polar/azimuthal angles (θ, φ)
 - Samples points uniformly using a Latin Hypercube sampler.
 - Evaluates per-mode SNRs with FEW (Kerr, eccentric, equatorial inspirals).
-- Keeps points where where one GW mode dominates; SNR_mode1/SNR_mode2 ≥ THR_SNR.
+- Keeps points where where one GW mode dominates; SNR_mode1/SNR_mode2 ≥ THR_RATIO.
 - Saves points and their (l,m,k,n) mode indices into an HDF5 file.
 
 ⸻
@@ -41,7 +41,7 @@ Each new run appends more samples to the same file.
 
 Adjustable settings (top of kerr_map.py)
 - Observation grid: DT_SEC, T_YEARS
-- Threshold: THR_SNR
+- Threshold: THR_RATIO
 - Number of samples: SCAN_SAMPLES
 - Random seed: RANDOM_SEED
 - Parameter ranges: LOG10_M1_RANGE, LOG10_M2_RANGE, a_RANGE, e0_RANGE, p0_RANGE, THETA_RANGE, PHI_RANGE
