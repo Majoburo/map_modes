@@ -25,14 +25,14 @@ SAVE_PREFIX = "snr_ratio_kerr"  # output prefix for HDF5 and PNG
 
 # --- Plotting & storage controls ---
 # Parameter ranges (intrinsic)
-LOG10_M1_RANGE = (np.log10(5e5), np.log10(2e6))  # MBH mass
-LOG10_M2_RANGE = (np.log10(1e1), np.log10(1e2))  # compact object mass
-a_RANGE = (0.0, 0.999)
-e0_RANGE = (0.0, 0.75)
+LOG10_M1_RANGE = (np.log10(5e5), np.log10(2e6))  # MBH mass in solar masses
+LOG10_M2_RANGE = (np.log10(1e1), np.log10(1e2))  # compact object mass in solar masses
+a_RANGE = (0.0, 0.999) # spin of SMBH
+e0_RANGE = (0.0, 0.75) # Initial eccentricity of inspiral trajectory.
 xI = 1 # Prograde orbits
-p0_RANGE = (7.5, 17)
-THETA_RANGE = (0.0, np.pi)
-PHI_RANGE   = (0.0, 2.0*np.pi)
+p0_RANGE = (7.5, 17) # Initial semilatus rectum of inspiral trajectory. 
+THETA_RANGE = (0.0, np.pi) # Polar angle of observer.
+PHI_RANGE   = (0.0, 2.0*np.pi) # Azimuthal angle of observer.
 
 # Fixed distance 
 DIST_GPC = 1.0
