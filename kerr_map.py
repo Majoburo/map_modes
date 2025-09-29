@@ -15,7 +15,7 @@ from few.waveform import FastKerrEccentricEquatorialFlux
 # Observation / integration granularity — coarser values make FEW runs much faster.
 DT_SEC = 10.0      # seconds per sample
 T_YEARS = 0.1       # total duration in years
-THR_SNR = 5.       # absolute per-mode SNR threshold (keep modes with SNR >= THR_SNR)
+THR_RATIO = 5.       # SNR RATIO threshold (keep modes with SNR_highest/SNR_secondhighest >= THR_RATIO)
 RANDOM_SEED = 1344342
 
 # --- Mapping settings for 1-mode region ---
@@ -165,7 +165,7 @@ def random_scan_one_mode(n_samples: int, seed: int, n_skip: int):
     l1,l2,aa,pp0,ee0,thh,phh = _sample_uniform(total, seed, n_skip=n_skip)
 
     # Single-process filter over the entire set
-    pts_out, modes_out = _count_and_filter((l1,l2,aa,pp0,ee0,thh,phh), THR_SNR)
+    pts_out, modes_out = _count_and_filter((l1,l2,aa,pp0,ee0,thh,phh), THR_RATIO)
 
     return pts_out, modes_out, seed, n_skip + total
 
@@ -229,7 +229,7 @@ def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, seed: int, 
         # Helpful provenance
         f.attrs["DT_SEC"] = float(DT_SEC)
         f.attrs["T_YEARS"] = float(T_YEARS)
-        f.attrs["THR_SNR"] = float(THR_SNR)
+        f.attrs["THR_RATIO"] = float(THR_RATIO)
         f.attrs["columns_pts"] = np.array([b"log10_m1", b"log10_m2", b"a", b"p0", b"e0", b"theta", b"phi"], dtype="S")
         f.attrs["columns_modes"] = np.array([b"l", b"m", b"k", b"n"], dtype="S")
 
@@ -261,7 +261,7 @@ def main():
         print("[scan] Mapping the 1‑mode region …")
         newpts, newmode_indices, seed, n_done = random_scan_one_mode(SCAN_SAMPLES, RANDOM_SEED, 0)
         if newpts.size == 0:
-            print("[scan] No 1‑mode points found. Increase SCAN_SAMPLES or lower THR_SNR.")
+            print("[scan] No 1‑mode points found. Increase SCAN_SAMPLES or lower THR_RATIO.")
             return
         save_to_h5(h5_path, newpts, newmode_indices, seed, n_done)
         pts = newpts
