@@ -1,53 +1,55 @@
-# map_modes — One‑Mode Mapping with FEW
+# EMRI One-Mode Map
 
-This project explores regions of EMRI parameter space where **exactly one GW mode** survives an SNR threshold. It builds on [FastEMRIWaveforms (FEW)](https://github.com/BlackHolePerturbationToolkit/FastEMRIWaveforms) and produces both CSV data and visual summaries.
+Map regions of EMRI parameter space with [FastEMRIWaveforms (FEW)](https://github.com/BlackHolePerturbationToolkit/FastEMRIWaveforms) where one GW mode dominates (brightest vs 2nd brightest SNR), so a detector might see only that mode. Results are stored in an HDF5 file for later plotting or analysis.
 
 ---
 
 ## Quickstart
 
 ```bash
+git clone --recurse-submodules git@github.com:Majoburo/map_modes.git
+cd map_modes
 uv sync
-uv run python one_mode_map.py
-```
+uv run python kerr_map.py # sch_map.py for schwarzchild.
 
-Outputs:
-- `one_mode_map.csv` — sampled points + surviving mode indices `(l,m,k,n)`
-- `one_mode_map_corner_scatter.png` — corner plot (scatter off‑diagonal, histograms on diagonal)
+⸻
 
----
+What it does
+- Defines parameter ranges for:
+    - SMBH mass M1 (log10)
+    - Compact object mass M2 (log10)
+    - SMBH spin a
+    - Initial eccentricity e0
+    - Initial semi-latus rectum p0
+    - Observer polar/azimuthal angles (θ, φ)
+- Samples points uniformly using a Latin Hypercube sampler.
+- Evaluates per-mode SNRs with FEW (Kerr, eccentric, equatorial inspirals).
+- Keeps points where exactly one mode has SNR ≥ THR_SNR.
+- Saves points and their (l,m,k,n) mode indices into an HDF5 file.
 
-## Example Output
+⸻
 
-A curated plot is stored under `docs/` for display:
+Outputs
+- snr_ratio_kerr.h5 — HDF5 file with:
+- /pts: array of sampled parameters (log10_m1, log10_m2, a, p0, e0, theta, phi)
+- /modes: corresponding single surviving mode indices (l, m, k, n)
+- Attributes: DT_SEC, T_YEARS, THR_SNR, SEED, N_DONE
 
-![Example scatter corner](docs/example_scatter_corner.png)
+Each new run appends more samples to the same file.
 
----
+⸻
 
-## How it Works
+Adjustable settings (top of kerr_map.py)
+- Observation grid: DT_SEC, T_YEARS
+- Threshold: THR_SNR
+- Number of samples: SCAN_SAMPLES
+- Random seed: RANDOM_SEED
+- Parameter ranges: LOG10_M1_RANGE, LOG10_M2_RANGE, a_RANGE, e0_RANGE, p0_RANGE, THETA_RANGE, PHI_RANGE
+- Output file prefix: SAVE_PREFIX
 
-1. Sobol sampling across the prior space $(\log_{10}M_1, \log_{10}M_2, e_0, p_0)$.
-2. Evaluate per‑mode SNRs via a custom FEW dev branch.
-3. Keep points with exactly one mode above threshold.
-4. Save surviving samples and mode indices.
-5. Render a scatter‑corner plot: histograms on diagonal, colored scatters off‑diagonal.
+⸻
 
----
+Notes
+- Resume is automatic: if snr_ratio_kerr.h5 exists, the script appends new points.
+- If no one-mode points are found, try increasing SCAN_SAMPLES or lowering THR_SNR.
 
-## Dependencies
-
-`numpy`, `scipy`, `tqdm`, `seaborn`, `pandas`
-
----
-
-## Notes
-
-- `fastemriwaveforms` is tracked as a dev dependency.
-
----
-
-## Acknowledgments
-
-- [FastEMRIWaveforms](https://github.com/BlackHolePerturbationToolkit/FastEMRIWaveforms)
-- Scientific Python ecosystem
