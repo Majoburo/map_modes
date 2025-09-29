@@ -24,7 +24,7 @@ What it does
     - Observer polar/azimuthal angles (θ, φ)
 - Samples points uniformly using a Latin Hypercube sampler.
 - Evaluates per-mode SNRs with FEW (Kerr, eccentric, equatorial inspirals).
-- Keeps points where exactly one mode has SNR ≥ THR_SNR.
+- Keeps points where where one GW mode dominates; SNR_mode1/SNR_mode2 ≥ THR_SNR.
 - Saves points and their (l,m,k,n) mode indices into an HDF5 file.
 
 ⸻
