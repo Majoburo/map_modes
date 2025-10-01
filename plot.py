@@ -4,10 +4,10 @@ import pandas as pd
 import seaborn as sns
 import h5py
 
-SAVE_PREFIX = "snr_ratio_aak"  # output prefix for HDF5 and PNG
+SAVE_PREFIX = "snr_ratio_kerr_keep"  # output prefix for HDF5 and PNG
 
 def make_scatter_corner(pts, mode_indices):
-    cols = ["log10_m1","log10_m2","a","p0","e0","theta","phi"]
+    cols = ["log10_m1","log10_m2","a","p0","e0","theta","phi","snr_ratio"]
     if pts.size == 0:
         raise ValueError("No points in HDF5 yet; run the mapper first.")
 
@@ -28,7 +28,7 @@ def make_scatter_corner(pts, mode_indices):
     #                bw_method='scott',   # robust default; adjust if needed
     #                gridsize=128,        # balance speed/quality
     #                linewidths=1.0) 
-    g.map_lower(sns.scatterplot,s=1, alpha=0.55, linewidth=0, rasterized=True)
+    g.map_lower(sns.scatterplot,s=8, alpha=0.55, linewidth=0, rasterized=True)
     
     # diagonal histograms
     g.map_diag(sns.histplot, bins=52, fill=True, linewidth=0.0)

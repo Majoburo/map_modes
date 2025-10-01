@@ -15,13 +15,13 @@ from few.waveform import FastKerrEccentricEquatorialFlux
 # Observation / integration granularity — coarser values make FEW runs much faster.
 DT_SEC = 10.0      # seconds per sample
 T_YEARS = 0.1       # total duration in years
-THR_RATIO = 5.       # SNR RATIO threshold (keep modes with SNR_highest/SNR_secondhighest >= THR_RATIO)
+THR_RATIO = 3.       # SNR RATIO threshold (keep modes with SNR_highest/SNR_secondhighest >= THR_RATIO)
 RANDOM_SEED = 1344342
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(1_000_000))   # total random samples over the full prior hyper-rectangle
+SCAN_SAMPLES = 2**int(np.log2(1_000))   # total random samples over the full prior hyper-rectangle
 
-SAVE_PREFIX = "snr_ratio_kerr"  # output prefix for HDF5 and PNG
+SAVE_PREFIX = "snr_ratio_kerr_keep"  # output prefix for HDF5 and PNG
 
 # --- Plotting & storage controls ---
 # Parameter ranges (intrinsic)
@@ -89,12 +89,14 @@ def eval_mode(m1: float, m2: float, a: float,  p0: float, e0: float, theta: floa
         dt=float(DT_SEC),
         snr_abs_thr=thr, # the SNR threshold is at source, multiply by distance for realistic SNR
     )
+
+    snr_ratio = few_nw.snr_ratio
     n_kept = int(few_nw.num_modes_kept)
     ls = np.atleast_1d(few_nw.ls)
     ms = np.atleast_1d(few_nw.ms)
     ks = np.atleast_1d(few_nw.ks)
     ns = np.atleast_1d(few_nw.ns)
-    return n_kept, ls, ms, ks, ns
+    return n_kept, snr_ratio, ls, ms, ks, ns
 
 
 def _sample_uniform(n, seed, n_skip=0):
@@ -133,24 +135,24 @@ def _count_and_filter(chunk_arrays, thr):
         a   = float(aa[i]);  p0  = float(pp0[i]); e0 = float(ee0[i])
         theta = float(thh[i]); phi = float(phh[i])
         try:
-            n, mode_tuple = eval_count_and_mode(lm1, lm2, a, p0, e0, theta, phi, thr)
+            n, snr_ratio, mode_tuple = eval_count_and_mode(lm1, lm2, a, p0, e0, theta, phi, thr)
         except Exception:
             pbar.update(1)
             continue
         if n == 1:
-            keep.append((lm1, lm2, a, p0, e0, theta, phi))
+            keep.append((lm1, lm2, a, p0, e0, theta, phi, snr_ratio))
             modes_rec.append(mode_tuple)
         pbar.update(1)
     pbar.close()
     if keep:
         return np.array(keep, float), np.array(modes_rec, int)
     else:
-        return np.empty((0,7), float), np.empty((0,4), int)
+        return np.empty((0,8), float), np.empty((0,4), int)
 
 
 def random_scan_one_mode(n_samples: int, seed: int, n_skip: int):
     """
-    Sobol sampling over the full parameter box, keeping tuples where
+    Lhc sampling over the full parameter box, keeping tuples where
     the evaluator returns exactly one kept mode.
 
     Returns:
@@ -161,7 +163,7 @@ def random_scan_one_mode(n_samples: int, seed: int, n_skip: int):
     """
     total = int(n_samples)
 
-    # Generate the full Sobol block at the proper offset
+    # Generate the full lhc block at the proper offset
     l1,l2,aa,pp0,ee0,thh,phh = _sample_uniform(total, seed, n_skip=n_skip)
 
     # Single-process filter over the entire set
@@ -181,16 +183,16 @@ def eval_count_and_mode(
     m2 = 10 ** float(log10_m2)
     # Ask FEW to provide number of kept modes and their (l,m,k,n)
     try:
-        n_kept, ls, ms, ks, ns = eval_mode(m1, m2, a, p0, e0, theta, phi, thr)
+        n_kept, snr_ratio, ls, ms, ks, ns = eval_mode(m1, m2, a, p0, e0, theta, phi, thr)
     except Exception as e:
         print(e)
-        return -1, (-1, -1, -1, -1)
+        return -1, -1, (-1, -1, -1, -1)
 
     if n_kept == 1 and len(ls) >= 1:
         mode_tuple = (int(ls[0]), int(ms[0]), int(ks[0]), int(ns[0]))
     else:
         mode_tuple = (-1, -1, -1, -1)
-    return int(n_kept), mode_tuple
+    return int(n_kept), float(snr_ratio), mode_tuple
 
 
 # ----------------------------
@@ -218,7 +220,7 @@ def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, seed: int, 
     """Append new rows to HDF5 and update run state as attributes."""
     with h5py.File(path, "a") as f:
         # Datasets live at root for simplicity
-        pts_ds = _ensure_dset(f, "pts", shape=(0, 7), dtype="f8", maxshape=(None, 7))
+        pts_ds = _ensure_dset(f, "pts", shape=(0, 8), dtype="f8", maxshape=(None, 8))
         modes_ds = _ensure_dset(f, "modes", shape=(0, 4), dtype="i4", maxshape=(None, 4))
         # Append
         _append_rows(pts_ds, np.asarray(pts, dtype=np.float64))
@@ -230,16 +232,16 @@ def save_to_h5(path: str, pts: np.ndarray, mode_indices: np.ndarray, seed: int, 
         f.attrs["DT_SEC"] = float(DT_SEC)
         f.attrs["T_YEARS"] = float(T_YEARS)
         f.attrs["THR_RATIO"] = float(THR_RATIO)
-        f.attrs["columns_pts"] = np.array([b"log10_m1", b"log10_m2", b"a", b"p0", b"e0", b"theta", b"phi"], dtype="S")
+        f.attrs["columns_pts"] = np.array([b"log10_m1", b"log10_m2", b"a", b"p0", b"e0", b"theta", b"phi", b"snr_ratio"], dtype="S")
         f.attrs["columns_modes"] = np.array([b"l", b"m", b"k", b"n"], dtype="S")
 
 
 def load_from_h5(path: str):
     """Return (pts, mode_indices, seed, n_done). Missing file ⇒ empty arrays and default seed/done."""
     if not os.path.exists(path):
-        return np.empty((0,7), float), np.empty((0,4), int), RANDOM_SEED, 0
+        return np.empty((0,8), float), np.empty((0,4), int), RANDOM_SEED, 0
     with h5py.File(path, "r") as f:
-        pts = np.asarray(f["pts"]) if "pts" in f else np.empty((0,7), float)
+        pts = np.asarray(f["pts"]) if "pts" in f else np.empty((0,8), float)
         modes = np.asarray(f["modes"]) if "modes" in f else np.empty((0,4), int)
         seed = int(f.attrs.get("SEED", RANDOM_SEED))
         n_done = int(f.attrs.get("N_DONE", 0))
@@ -276,7 +278,7 @@ def main():
             mode_indices = np.concatenate([mode_indices, newmode_indices], axis=0)
         else:
             # Still update state even if nothing appended (e.g., errors)
-            save_to_h5(h5_path, np.empty((0,7)), np.empty((0,4)), seed, n_done)
+            save_to_h5(h5_path, np.empty((0,8)), np.empty((0,4)), seed, n_done)
 
     print(f"[scan] Saved {len(pts)} total points → {h5_path}")
 
