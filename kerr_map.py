@@ -14,12 +14,12 @@ from few.waveform import FastKerrEccentricEquatorialFlux
 # ----------------------------
 # Observation / integration granularity — coarser values make FEW runs much faster.
 DT_SEC = 10.0      # seconds per sample
-T_YEARS = 0.1       # total duration in years
+T_YEARS = 1.       # total duration in years
 THR_RATIO = 3.       # SNR RATIO threshold (keep modes with SNR_highest/SNR_secondhighest >= THR_RATIO)
 RANDOM_SEED = 1344342
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(1_000))   # total random samples over the full prior hyper-rectangle
+SCAN_SAMPLES = 2**int(np.log2(2_000_000))   # total random samples over the full prior hyper-rectangle
 
 SAVE_PREFIX = "snr_ratio_kerr_keep"  # output prefix for HDF5 and PNG
 

@@ -2,53 +2,45 @@ import os
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.colors import LogNorm
-import matplotlib as mpl
 import h5py
 
-SAVE_PREFIX = "snr_ratio_kerr_keep_10"  # output prefix for HDF5 and PNG
+SAVE_PREFIX = "snr_ratio_kerr_100"  # output prefix for HDF5 and PNG
 
 def make_scatter_corner(pts, mode_indices):
     cols = ["log10_m1","log10_m2","a","p0","e0","theta","phi","snr_ratio"]
-    vars_no_snr = ["log10_m1","log10_m2","a","p0","e0","theta","phi"]
     if pts.size == 0:
         raise ValueError("No points in HDF5 yet; run the mapper first.")
 
     df = pd.DataFrame(pts, columns=cols)
 
-    # Build a PairGrid excluding snr_ratio from the axes,
-    # but keep it available for continuous hue coloring.
-    g = sns.PairGrid(df, vars=vars_no_snr, corner=True, height=2.6, diag_sharey=False)
-    
-    hue_vals = df["snr_ratio"].to_numpy()
-    vmin = max(hue_vals.min(), 0.0)
-    vmax = 10 # hue_vals.max()
-    norm = LogNorm(vmin=vmin, vmax=vmax)
+    df["mode"] = [f"{l},{m},{k},{n}" for (l,m,k,n) in mode_indices]
 
-    g.map_lower(
-        sns.scatterplot,
-        s=1, alpha=0.7, linewidth=0, rasterized=True,
-        hue=hue_vals, palette="magma", hue_norm=norm, legend=False
-    )
+    # keep legend small
+    top = set(df["mode"].value_counts().index[:12])
+    df["mode_plot"] = np.where(df["mode"].isin(top), df["mode"], "other")
+
+    g = sns.PairGrid(df, vars=cols, hue="mode_plot", corner=True, height=2.6, diag_sharey=False)
+
+    # base scatter
+    #g.map_lower(sns.kdeplot, fill=False,          # contour lines only
+    #                levels=5,            # number of contour levels
+    #                thresh=0.05,         # hide ultra-low density noise
+    #                bw_method='scott',   # robust default; adjust if needed
+    #                gridsize=128,        # balance speed/quality
+    #                linewidths=1.0) 
+    g.map_lower(sns.scatterplot,s=8, alpha=0.55, linewidth=0, rasterized=True)
     
     # diagonal histograms
     g.map_diag(sns.histplot, bins=52, fill=True, linewidth=0.0)
 
-    # Single shared colorbar for continuous log-hue
-    sm = mpl.cm.ScalarMappable(cmap="magma", norm=norm)
-    sm.set_array([])
-    # Attach colorbar to all axes in the grid
-    valid_axes = [ax for ax in g.axes.flat if ax is not None]
-    from matplotlib.ticker import LogLocator, FuncFormatter
-    g.fig.colorbar(
-        sm,
-        ax=valid_axes,
-        fraction=0.03,
-        pad=0.04,
-        ticks=LogLocator(base=10, subs=(1, 2, 5)),           # tick positions
-        format=FuncFormatter(lambda v, pos: f"{v:.2g}")      # numeric labels
-    )
-    #g.fig.colorbar(sm, ax=valid_axes, fraction=0.03, pad=0.04, label="snr_ratio (log scale)")
+    # tidy legend (robust across seaborn versions)
+    g.add_legend(frameon=False, title="mode", labelspacing=0.3, handlelength=0.8, markerscale=8.0)
+    legend = getattr(g, "_legend", None)
+    for lh in legend.legend_handles:
+        try:
+            lh.set_alpha(0.9)
+        except Exception:
+            pass
     return g
 
 
