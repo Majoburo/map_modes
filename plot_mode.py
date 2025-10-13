@@ -4,7 +4,7 @@ import pandas as pd
 import seaborn as sns
 import h5py
 
-SAVE_PREFIX = "snr_ratio_kerr_100"  # output prefix for HDF5 and PNG
+SAVE_PREFIX = "snr_ratio_kerr_keep_10"  # output prefix for HDF5 and PNG
 
 def make_scatter_corner(pts, mode_indices):
     cols = ["log10_m1","log10_m2","a","p0","e0","theta","phi","snr_ratio"]
@@ -12,6 +12,7 @@ def make_scatter_corner(pts, mode_indices):
         raise ValueError("No points in HDF5 yet; run the mapper first.")
 
     df = pd.DataFrame(pts, columns=cols)
+
 
     df["mode"] = [f"{l},{m},{k},{n}" for (l,m,k,n) in mode_indices]
 
@@ -66,7 +67,7 @@ def main():
         print("[plot] No data to plot — run the scan to generate HDF5 first.")
         return
     g = make_scatter_corner(pts, mode_indices)
-    out_png = f"{SAVE_PREFIX}_corner_scatter.png"
+    out_png = f"{SAVE_PREFIX}_mode_corner_scatter.png"
     g.savefig(out_png, dpi=200, bbox_inches="tight")
     print(f"[scan] Wrote corner plot to {out_png}")
 

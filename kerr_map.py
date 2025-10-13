@@ -53,7 +53,11 @@ def build_few():
     f = np.asarray(noise["f"], float)
     PSD = np.asarray(noise["ASD"], float)**2
     sens_fn = ClippedInterpolant(CubicSplineInterpolant(f, PSD))
-
+    #sens_fn = CubicSplineInterpolant(f, PSD)
+    #import matplotlib.pyplot as plt
+    #breakpoint()
+    #plt.loglog(f,sens_fn(f))
+    #plt.show()
     mode_selector_kwargs = {"sensitivity_fn": sens_fn}
 
     few_nw = FastKerrEccentricEquatorialFlux(
@@ -91,12 +95,13 @@ def eval_mode(m1: float, m2: float, a: float,  p0: float, e0: float, theta: floa
     )
 
     snr_ratio = few_nw.snr_ratio
+    snr_top = few_nw.snr_top
     n_kept = int(few_nw.num_modes_kept)
     ls = np.atleast_1d(few_nw.ls)
     ms = np.atleast_1d(few_nw.ms)
     ks = np.atleast_1d(few_nw.ks)
     ns = np.atleast_1d(few_nw.ns)
-    return n_kept, snr_ratio, ls, ms, ks, ns
+    return n_kept, snr_ratio, snr_top, ls, ms, ks, ns
 
 
 def _sample_uniform(n, seed, n_skip=0):
@@ -135,11 +140,11 @@ def _count_and_filter(chunk_arrays, thr):
         a   = float(aa[i]);  p0  = float(pp0[i]); e0 = float(ee0[i])
         theta = float(thh[i]); phi = float(phh[i])
         try:
-            n, snr_ratio, mode_tuple = eval_count_and_mode(lm1, lm2, a, p0, e0, theta, phi, thr)
+            n, snr_ratio, snr_top, mode_tuple = eval_count_and_mode(lm1, lm2, a, p0, e0, theta, phi, thr)
         except Exception:
             pbar.update(1)
             continue
-        if n == 1:
+        if n == 1 and snr_top > 10:
             keep.append((lm1, lm2, a, p0, e0, theta, phi, snr_ratio))
             modes_rec.append(mode_tuple)
         pbar.update(1)
@@ -183,16 +188,16 @@ def eval_count_and_mode(
     m2 = 10 ** float(log10_m2)
     # Ask FEW to provide number of kept modes and their (l,m,k,n)
     try:
-        n_kept, snr_ratio, ls, ms, ks, ns = eval_mode(m1, m2, a, p0, e0, theta, phi, thr)
+        n_kept, snr_ratio, snr_top, ls, ms, ks, ns = eval_mode(m1, m2, a, p0, e0, theta, phi, thr)
     except Exception as e:
         print(e)
-        return -1, -1, (-1, -1, -1, -1)
+        return -1, -1, -1, (-1, -1, -1, -1)
 
     if n_kept == 1 and len(ls) >= 1:
         mode_tuple = (int(ls[0]), int(ms[0]), int(ks[0]), int(ns[0]))
     else:
         mode_tuple = (-1, -1, -1, -1)
-    return int(n_kept), float(snr_ratio), mode_tuple
+    return int(n_kept), float(snr_ratio), float(snr_top), mode_tuple
 
 
 # ----------------------------

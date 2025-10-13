@@ -15,6 +15,8 @@ def make_scatter_corner(pts, mode_indices):
         raise ValueError("No points in HDF5 yet; run the mapper first.")
 
     df = pd.DataFrame(pts, columns=cols)
+    #df['col_A'].mask(df['snr_ratio'] < 4, other=999)
+    df = df[df['snr_ratio'] < 4]
 
     # Build a PairGrid excluding snr_ratio from the axes,
     # but keep it available for continuous hue coloring.
@@ -22,12 +24,12 @@ def make_scatter_corner(pts, mode_indices):
     
     hue_vals = df["snr_ratio"].to_numpy()
     vmin = max(hue_vals.min(), 0.0)
-    vmax = 10 # hue_vals.max()
+    vmax = hue_vals.max()
     norm = LogNorm(vmin=vmin, vmax=vmax)
 
     g.map_lower(
         sns.scatterplot,
-        s=1, alpha=0.7, linewidth=0, rasterized=True,
+        s=3, alpha=1, linewidth=0, rasterized=True,
         hue=hue_vals, palette="magma", hue_norm=norm, legend=False
     )
     
