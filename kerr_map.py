@@ -134,6 +134,7 @@ def _count_and_filter(chunk_arrays, thr):
     l1,l2,aa,pp0,ee0,thh,phh = chunk_arrays
     keep = []
     modes_rec = []
+    accepted = 0
     pbar = tqdm(total=len(l1), desc="[scan] samples", unit="pts", leave=False)
     for i in range(len(l1)):
         lm1 = float(l1[i]); lm2 = float(l2[i])
@@ -147,6 +148,8 @@ def _count_and_filter(chunk_arrays, thr):
         if n == 1 and snr_top > 10:
             keep.append((lm1, lm2, a, p0, e0, theta, phi, snr_ratio))
             modes_rec.append(mode_tuple)
+            accepted += 1
+            pbar.set_postfix(accepted=accepted)
         pbar.update(1)
     pbar.close()
     if keep:
