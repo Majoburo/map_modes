@@ -8,6 +8,8 @@ import numpy as np
 from few import get_file_manager
 from few.summation.interpolatedmodesum import CubicSplineInterpolant
 from few.waveform import FastKerrEccentricEquatorialFlux
+from few.utils.constants import MRSUN_SI, Gpc
+
 
 # ----------------------------
 # Settings (edit these only)
@@ -19,7 +21,7 @@ THR_RATIO = 3.       # SNR RATIO threshold (keep modes with SNR_highest/SNR_seco
 RANDOM_SEED = 1344342
 
 # --- Mapping settings for 1-mode region ---
-SCAN_SAMPLES = 2**int(np.log2(2_000_000))   # total random samples over the full prior hyper-rectangle
+SCAN_SAMPLES = 2**int(np.log2(2_000))   # total random samples over the full prior hyper-rectangle
 
 SAVE_PREFIX = "snr_ratio_kerr_keep"  # output prefix for HDF5 and PNG
 
@@ -36,6 +38,7 @@ PHI_RANGE   = (0.0, 2.0*np.pi) # Azimuthal angle of observer.
 
 # Fixed distance 
 DIST_GPC = 1.0
+
 
 class ClippedInterpolant:
     def __init__(self, base):
@@ -142,10 +145,13 @@ def _count_and_filter(chunk_arrays, thr):
         theta = float(thh[i]); phi = float(phh[i])
         try:
             n, snr_ratio, snr_top, mode_tuple = eval_count_and_mode(lm1, lm2, a, p0, e0, theta, phi, thr)
+            mu = 10**lm2 / (1+10**(lm2-lm1))
+            dist_dimensionless = (DIST_GPC * Gpc) / (mu * MRSUN_SI)
+            breakpoint()
         except Exception:
             pbar.update(1)
             continue
-        if n == 1 and snr_top > 10:
+        if n == 1 and snr_top > 10*dist_dimensionless:
             keep.append((lm1, lm2, a, p0, e0, theta, phi, snr_ratio))
             modes_rec.append(mode_tuple)
             accepted += 1
