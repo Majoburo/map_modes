@@ -147,7 +147,6 @@ def _count_and_filter(chunk_arrays, thr):
             n, snr_ratio, snr_top, mode_tuple = eval_count_and_mode(lm1, lm2, a, p0, e0, theta, phi, thr)
             mu = 10**lm2 / (1+10**(lm2-lm1))
             dist_dimensionless = (DIST_GPC * Gpc) / (mu * MRSUN_SI)
-            breakpoint()
         except Exception:
             pbar.update(1)
             continue
